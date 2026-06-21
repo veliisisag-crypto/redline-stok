@@ -33,7 +33,7 @@ function AuditSection({ supabase }: { supabase: typeof import("@/lib/supabase").
 
 type GenderCategory = "Kadın" | "Erkek" | "Unisex";
 type SaleType = "Normal satış" | "Fire/Bozuk" | "Hibe";
-type Seller = "Rabia" | "Harun";
+type Seller = "Rabia" | "Harun" | "56Kasa";
 
 type PreorderItem = {
   id: string;
@@ -2517,7 +2517,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   );
                 })()}
                 <input className="input" type="number" min="1" placeholder="Adet" value={saleForm.qty} onChange={(e) => setSaleForm({ ...saleForm, qty: e.target.value })} />
-                <select className="input" value={saleForm.seller} onChange={(e) => setSaleForm({ ...saleForm, seller: e.target.value as Seller })}><option>Rabia</option><option>Harun</option></select>
+                <select className="input" value={saleForm.seller} onChange={(e) => setSaleForm({ ...saleForm, seller: e.target.value as Seller })}><option>Rabia</option><option>Harun</option><option>56Kasa</option></select>
                 <select className="input" value={saleForm.saleType} onChange={(e) => {
                   const t = e.target.value as SaleType;
                   setSaleForm({ ...saleForm, saleType: t, customSalePrice: (t === "Fire/Bozuk" || t === "Hibe") ? "0" : saleForm.customSalePrice });
@@ -2552,7 +2552,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     customerMap.get(sale.customer_id)?.name || "-",
                     productMap.get(sale.product_id)?.name || "-",
                     batchMap.get(sale.batch_id)?.name || "-",
-                    isEditing ? <select key="seller" className="input" value={draft.seller} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], seller: e.target.value as Seller } }))}><option>Rabia</option><option>Harun</option></select> : sale.seller,
+                    isEditing ? <select key="seller" className="input" value={draft.seller} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], seller: e.target.value as Seller } }))}><option>Rabia</option><option>Harun</option><option>56Kasa</option></select> : sale.seller,
                     isEditing ? <select key="type" className="input" value={draft.sale_type} onChange={(e) => { const t = e.target.value as SaleType; setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], sale_type: t, total: (t === "Fire/Bozuk" || t === "Hibe") ? "0" : p[sale.id].total } })); }}><option>Normal satış</option><option>Fire/Bozuk</option><option>Hibe</option></select> : sale.sale_type,
                     isEditing ? <input key="qty" className="input" style={{width:64}} type="number" min="1" value={draft.qty} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], qty: e.target.value } }))} /> : sale.qty,
                     isEditing ? <input key="total" className="input" style={{width:100}} type="number" min="0" value={draft.total} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], total: e.target.value } }))} /> : money(sale.total),
@@ -2668,11 +2668,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         {active === "period" && (
           <div className="space-y-4">
-            <div style={{background:"#fefce8", border:"1px solid #fde047", borderRadius:12, padding:"14px 16px", fontSize:"0.82rem", color:"#713f12", lineHeight:1.6}}>
-              <div style={{fontWeight:700, marginBottom:4}}>📌 Maliyet Hesaplama Notu</div>
-              1–2–3–4–5–6. partilerinin tüm extra maliyetleri toplandı, tüm alınan ürün adedine bölündü. <strong>Ürün başına 38,4 TL ek maliyet</strong> geldi. Dönem kapanışında tahsilatlara konu satışların maliyeti hesaplanacak, bu ek maliyetler üstüne eklenecek ve dönem karı bulunacak.<br />
-              <strong>Dönem Karı = Dönem Tahsilatları − Dönem Maliyetleri</strong>
-            </div>
+
             <Card title="Dönem Kapanışı">
               <p className="mb-5 text-slate-500">Kasadaki para eşit dağıtılır; borcu olan ortağın payı önce borcundan düşülür.</p>
               <div className="mb-5 grid gap-4 text-sm md:grid-cols-5">
