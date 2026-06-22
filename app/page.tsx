@@ -31,7 +31,6 @@ function AuditSection({ supabase }: { supabase: typeof import("@/lib/supabase").
 }
 
 
-type GenderCategory = "Kadın" | "Erkek" | "Unisex";
 type SaleType = "Normal satış" | "Fire/Bozuk" | "Hibe";
 type Seller = string;
 
@@ -61,14 +60,19 @@ type Preorder = {
   items?: PreorderItem[];
 };
 
+type ProductType = {
+  id: string;
+  name: string;
+  active: boolean;
+};
+
 type Product = {
   id: string;
   name: string;
   code: string;
-  gender_category: GenderCategory;
   image_url: string | null;
-
   passive: boolean;
+  type_id: string | null;
 };
 
 type Customer = {
@@ -313,7 +317,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [customerDrafts, setCustomerDrafts] = useState<Record<string, Partial<Customer>>>({});
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
 
-  const [newProduct, setNewProduct] = useState({ name: "", genderCategory: "Kadın" as GenderCategory, image: "" });
+  const [newProduct, setNewProduct] = useState({ name: "", image: "", typeId: "" });
+  const [productTypes, setProductTypes] = useState<ProductType[]>([]);
+  const [newProductTypeName, setNewProductTypeName] = useState("");
+  const [productTypeMessage, setProductTypeMessage] = useState("");
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newBatchName, setNewBatchName] = useState("");
   const [batchReportFilter, setBatchReportFilter] = useState("Tümü");
@@ -377,8 +384,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setSaleForm((prev) => ({ ...prev, depo: defaultDepo, seller: defaultSeller }));
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
-      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes] = await Promise.all([
-        supabase.from("products").select("id,name,code,gender_category,image_url,passive").order("created_at", { ascending: true }),
+      const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, productTypesRes] = await Promise.all([
+        supabase.from("products").select("id,name,code,image_url,passive,type_id").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
         supabase.from("batch_items").select("*").order("created_at", { ascending: true }),
@@ -390,6 +397,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         supabase.from("preorders").select("*").order("created_at", { ascending: false }),
         supabase.from("preorder_items").select("*"),
         supabase.from("payment_allocations").select("*").order("created_at", { ascending: true }),
+        supabase.from("product_types").select("*").order("name", { ascending: true }),
       ]);
 
       for (const res of [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes]) {
@@ -404,6 +412,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setPayments((paymentsRes.data || []) as Payment[]);
       setPartners((partnersRes.data || []) as PartnerRow[]);
       setPeriods((periodsRes.data || []) as Period[]);
+      setProductTypes((productTypesRes.data || []) as ProductType[]);
       setBatchCosts((batchCostsRes.data || []) as BatchCost[]);
       setPreorders((preordersRes.data || []) as Preorder[]);
       setPreorderItems((preorderItemsRes.data || []) as PreorderItem[]);
@@ -693,6 +702,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const addProductDefinition = async () => {
     const name = newProduct.name.trim();
     if (!name || name.length > 50) return setMessage("Ürün adı zorunlu ve en fazla 50 karakter olmalı.");
+    if (!newProduct.typeId) return setMessage("Ürün türü seçimi zorunludur.");
     if (products.some((p) => p.name.toLowerCase() === name.toLowerCase())) return setMessage("Bu kaynak ürün zaten kayıtlı.");
 
     const idTail = Date.now().toString().slice(-6);
@@ -707,12 +717,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const { error } = await supabase.from("products").insert({
       name,
       code,
-      gender_category: newProduct.genderCategory,
       image_url: imageUrl,
+      type_id: newProduct.typeId,
     });
     if (error) return showError(error);
     await logAction("Ürün eklendi", "products", name, { code });
-    setNewProduct({ name: "", genderCategory: "Kadın", image: "" });
+    setNewProduct({ name: "", image: "", typeId: "" });
     setMessage("Kaynak ürün kaydedildi.");
     loadAll();
   };
@@ -721,9 +731,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const dbPatch: Record<string, unknown> = {};
     if (patch.name !== undefined) dbPatch.name = patch.name;
     if (patch.code !== undefined) dbPatch.code = patch.code;
-    if (patch.gender_category !== undefined) dbPatch.gender_category = patch.gender_category;
     if (patch.image_url !== undefined) dbPatch.image_url = patch.image_url;
     if (patch.passive !== undefined) dbPatch.passive = patch.passive;
+    if (patch.type_id !== undefined) dbPatch.type_id = patch.type_id;
     const { error } = await supabase.from("products").update(dbPatch).eq("id", productId);
     if (error) return showError(error);
     // Exclude image_url from log to avoid storing large base64/URL data
@@ -1335,7 +1345,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       ...productDrafts,
       [product.id]: {
         name: product.name,
-        gender_category: product.gender_category,
         image_url: product.image_url,
       },
     });
@@ -1364,7 +1373,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
     await updateProduct(productId, {
       name: String(draft.name || product?.name || "").trim(),
-      gender_category: (draft.gender_category || product?.gender_category) as GenderCategory,
       image_url: imageUrl,
     });
     cancelProductEdit(productId);
@@ -1433,7 +1441,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     return ["sales", "preorders"].includes(key);
   });
 
-  const filteredProducts = sortedProducts.filter((p) => `${p.name} ${p.code} ${p.gender_category}`.toLowerCase().includes(search.toLowerCase()));
+  const filteredProducts = sortedProducts.filter((p) => `${p.name} ${p.code}`.toLowerCase().includes(search.toLowerCase()));
 
   const handleSalesSort = (col: string) => setSalesSort((s) => ({ col, dir: s.col === col && s.dir === "asc" ? "desc" : "asc" }));
   const salesSortArr = (col: string) => salesSort.col === col ? (salesSort.dir === "asc" ? " ▲" : " ▼") : " ↕";
@@ -1720,6 +1728,36 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 ])}
               />
             </Card>
+            <Card title="Ürün Türleri">
+              {productTypeMessage && <div className="mb-3 rounded-lg bg-green-50 p-3 text-sm text-green-700">{productTypeMessage}</div>}
+              <div className="flex gap-2 mb-4">
+                <input className="input flex-1" placeholder="Yeni tür adı (örn: Şampuan, Boya, Manikür)" value={newProductTypeName} onChange={(e) => setNewProductTypeName(e.target.value)} />
+                <button type="button" className="btn-primary" onClick={async () => {
+                  const name = newProductTypeName.trim();
+                  if (!name) return;
+                  if (productTypes.some((t) => t.name.toLowerCase() === name.toLowerCase())) { setProductTypeMessage("Bu tür zaten mevcut."); return; }
+                  const { data, error } = await supabase.from("product_types").insert({ name, active: true }).select().single();
+                  if (error) { setProductTypeMessage("Hata: " + error.message); return; }
+                  setProductTypes((prev) => [...prev, data as ProductType]);
+                  setNewProductTypeName("");
+                  setProductTypeMessage(`"${name}" türü eklendi.`);
+                  setTimeout(() => setProductTypeMessage(""), 3000);
+                }}>Ekle</button>
+              </div>
+              <Table
+                headers={["Tür Adı", "Durum", "İşlem"]}
+                rows={productTypes.map((t) => [
+                  t.name,
+                  t.active ? <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">Aktif</span> : <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">Pasif</span>,
+                  <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={async () => {
+                    await supabase.from("product_types").update({ active: !t.active }).eq("id", t.id);
+                    setProductTypes((prev) => prev.map((x) => x.id === t.id ? { ...x, active: !t.active } : x));
+                    setProductTypeMessage(`"${t.name}" ${t.active ? "pasife alındı" : "aktife alındı"}.`);
+                    setTimeout(() => setProductTypeMessage(""), 3000);
+                  }}>{t.active ? "Pasife Al" : "Aktife Al"}</button>
+                ])}
+              />
+            </Card>
             <Card title="Yeni Kullanıcı Ekle">
               <div className="grid gap-3 md:grid-cols-4">
                 <input className="input" placeholder="İsim" value={newUserForm.name} onChange={(e) => setNewUserForm({ ...newUserForm, name: e.target.value })} />
@@ -1764,7 +1802,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <div className="product-add-form-panel">
                     <div className="grid gap-3 md:grid-cols-4">
                       <input className="input" maxLength={50} placeholder="Ürün adı (max 50)" value={newProduct.name} onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })} />
-                      <select className="input" value={newProduct.genderCategory} onChange={(e) => setNewProduct({ ...newProduct, genderCategory: e.target.value as GenderCategory })}><option>Kadın</option><option>Erkek</option><option>Unisex</option></select>
+                      <select className="input" value={newProduct.typeId} onChange={(e) => setNewProduct({ ...newProduct, typeId: e.target.value })}>
+                        <option value="">-- Ürün Türü Seç * --</option>
+                        {productTypes.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
                       <label className="input cursor-pointer text-center">Resim Seç<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => setNewProduct((prev) => ({ ...prev, image: String(reader.result || "") })); reader.readAsDataURL(file); }} /></label>
                       <button type="button" className="btn" onClick={addProductDefinition}>Kaynak Ürün Ekle</button>
                     </div>
@@ -1792,7 +1833,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                       <button type="button" className="product-row" onClick={() => openProductDetail(p)}>
                         <div className="product-row-left">
                           <div className="product-name">{p.name}</div>
-                          <div className="product-meta">{p.code} • {p.gender_category}</div>
+                          <div className="product-meta">{p.code}{p.type_id ? ` • ${productTypes.find((t) => t.id === p.type_id)?.name || ""}` : ""}</div>
                         </div>
                         <div className="product-row-stats">
                           <div className="product-stat-chip">
@@ -1845,7 +1886,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                               </div>
                               <div className="product-edit-fields">
                                 <label className="field-label"><span>Ürün adı</span><input className="input" maxLength={50} value={String(draft.name ?? p.name)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), name: e.target.value } })} /></label>
-                                <label className="field-label"><span>Kategori</span><select className="input" value={String(draft.gender_category ?? p.gender_category)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), gender_category: e.target.value as GenderCategory } })}><option>Kadın</option><option>Erkek</option><option>Unisex</option></select></label>
+                                <label className="field-label"><span>Ürün Türü</span><select className="input" value={String(draft.type_id ?? p.type_id ?? "")} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), type_id: e.target.value } })}><option value="">-- Seçiniz --</option>{productTypes.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
                               </div>
                               {/* Parti satırları düzenleme */}
                               {batchItemsForProduct(p.id).length > 0 && (
@@ -1916,7 +1957,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                 </div>
                                 <div className="product-info-chips product-info-chips--sm">
                                   <div className="product-info-chip product-info-chip--sm"><div className="product-info-chip-label">Kod</div><div className="product-info-chip-val">{p.code}</div></div>
-                                  <div className="product-info-chip product-info-chip--sm"><div className="product-info-chip-label">Kategori</div><div className="product-info-chip-val">{p.gender_category}</div></div>
+                                  
                                   <div className="product-info-chip product-info-chip--sm"><div className="product-info-chip-label">Durum</div><div className={`product-info-chip-val ${p.passive ? "product-info-chip-val--passive" : "product-info-chip-val--active"}`}>{p.passive ? "Pasif" : "Aktif"}</div></div>
                                 </div>
                               </div>
@@ -1967,10 +2008,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         )}
 
         {active === "gallery" && (() => {
-          const groups: { label: string; gender: GenderCategory }[] = [
-            { label: "Erkek", gender: "Erkek" },
-            { label: "Kadın", gender: "Kadın" },
-            { label: "Unisex", gender: "Unisex" },
+          const activeTypes = productTypes.filter((t) => t.active);
+          const groups = [
+            ...activeTypes.map((t) => ({ label: t.name, typeId: t.id })),
+            { label: "Türsüz", typeId: null as string | null },
           ];
           return (
             <div>
@@ -1979,10 +2020,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 <h2 style={{fontSize:"1.1rem", fontWeight:600}}>Toplu Ürün Resimleri</h2>
               </div>
               {groups.map((g) => {
-                const groupProducts = sortedProducts.filter((p) => !p.passive && p.gender_category === g.gender && p.image_url);
+                const groupProducts = sortedProducts.filter((p) => !p.passive && p.type_id === g.typeId && p.image_url);
                 if (!groupProducts.length) return null;
                 return (
-                  <div key={g.gender} style={{marginBottom: 32}}>
+                  <div key={g.typeId ?? "no-type"} style={{marginBottom: 32}}>
                     <div style={{fontSize:"0.75rem", fontWeight:700, color:"var(--color-text-secondary)", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:10, paddingBottom:6, borderBottom:"1.5px solid var(--color-border-tertiary)"}}>
                       {g.label} — {groupProducts.length} ürün
                     </div>
@@ -2578,7 +2619,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     .map((p) => {
                       const rabiaStock = batchItemsForProduct(p.id).filter((i) => i.depo === "56salon").reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
                       const türkişStock = batchItemsForProduct(p.id).filter((i) => i.depo === "Türkiş-salon").reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
-                      return <option key={p.id} value={p.id}>{p.name}  A: {rabiaStock}  T: {türkişStock}</option>;
+                      const typeName = productTypes.find((t) => t.id === p.type_id)?.name || "Türsüz";
+                      return <option key={p.id} value={p.id}>[{typeName}] {p.name}  A: {rabiaStock}  T: {türkişStock}</option>;
                     })}
                 </select>
                 {/* Depo: her zaman göster, kullanıcıya göre default */}
