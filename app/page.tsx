@@ -2818,15 +2818,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <option value="">Ürün seçin</option>
                   {sortedActiveProducts
                     .filter((p) => {
-                      const rabiaStock = batchItemsForProduct(p.id).filter((i) => i.depo === "56salon").reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
-                      const türkişStock = batchItemsForProduct(p.id).filter((i) => i.depo === "Türkiş-salon").reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
-                      return rabiaStock > 0 || türkişStock > 0;
+                      const totalStock = batchItemsForProduct(p.id).reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
+                      return totalStock > 0;
                     })
                     .map((p) => {
-                      const rabiaStock = batchItemsForProduct(p.id).filter((i) => i.depo === "56salon").reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
-                      const türkişStock = batchItemsForProduct(p.id).filter((i) => i.depo === "Türkiş-salon").reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
+                      const totalStock = batchItemsForProduct(p.id).reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
                       const typeName = productTypes.find((t) => t.id === p.type_id)?.name || "Türsüz";
-                      return <option key={p.id} value={p.id}>[{typeName}] {p.name}  A: {rabiaStock}  T: {türkişStock}</option>;
+                      return <option key={p.id} value={p.id}>[{typeName}] {p.name}  Stok: {totalStock}</option>;
                     })}
                 </select>
                 {/* Depo: her zaman göster, kullanıcıya göre default */}
