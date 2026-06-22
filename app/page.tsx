@@ -94,6 +94,7 @@ type BatchItem = {
   buy_price: number;
   sale_price: number;
   depo?: string;
+  barcode?: string;
 };
 
 type Sale = {
@@ -324,6 +325,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newBatchName, setNewBatchName] = useState("");
   const [batchReportFilter, setBatchReportFilter] = useState("Tümü");
+  // Barkod modal state
+  const [barcodeModal, setBarcodeModal] = useState<{
+    item: BatchItem;
+    productName: string;
+    batchName: string;
+  } | null>(null);
+  const [barcodeQty, setBarcodeQty] = useState("");
+  const [barcodeMode, setBarcodeMode] = useState<"yeni" | "tekrar">("yeni");
   const [batchReportSort, setBatchReportSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "batch", dir: "asc"});
   const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "56salon" });
   const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Rabia" as Seller, saleType: "Normal satış" as SaleType, paid: "false", customSalePrice: "", depo: "56salon" });
@@ -857,6 +866,127 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     await logAction("Partiye ürün eklendi", "batch_items", `${productMap.get(productId)?.name || productId} / ${batchMap.get(batchId)?.name || batchId}`, { adet: bought, alis: buyPrice, satis: salePrice, depo: batchForm.depo });
     setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "", depo: "56salon" });
     setMessage("Parti ürün kaydı eklendi.");
+    loadAll();
+  };
+
+  // Benzersiz barkod üret
+  const generateBarcode = () => {
+    const ts = Date.now().toString(36).toUpperCase();
+    const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
+    return `RL-${ts}-${rand}`;
+  };
+
+  // QR kodlu PDF oluştur ve yazdır (30x30mm, Phomemo M110)
+  const printBarcodePDF = async (barcodeValue: string, productName: string, qty: number) => {
+    // qrcode kütüphanesini dinamik import et
+    const QRCode = (await import("qrcode")).default;
+    
+    // Her etiket için QR canvas oluştur
+    const canvas = document.createElement("canvas");
+    await QRCode.toCanvas(canvas, barcodeValue, {
+      width: 200,
+      margin: 1,
+      color: { dark: "#000000", light: "#ffffff" },
+    });
+    const qrDataUrl = canvas.toDataURL("image/png");
+
+    // 30x30mm = ~113x113px @ 96dpi
+    const labelPx = 113;
+    const cols = 1;
+    const rows = qty;
+
+    // HTML tabanlı print window
+    const win = window.open("", "_blank");
+    if (!win) return;
+
+    const labels = Array(qty).fill(null).map(() => `
+      <div style="
+        width: ${labelPx}px;
+        height: ${labelPx}px;
+        border-radius: 50%;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: white;
+        padding: 4px;
+        box-sizing: border-box;
+        page-break-inside: avoid;
+      ">
+        <img src="${qrDataUrl}" style="width: 72px; height: 72px;" />
+        <div style="font-size: 6px; text-align: center; line-height: 1.2; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: Arial;">
+          ${productName.substring(0, 20)}
+        </div>
+        <div style="font-size: 5px; color: #666; font-family: monospace; letter-spacing: -0.3px;">
+          ${barcodeValue.substring(0, 16)}
+        </div>
+      </div>
+    `).join("");
+
+    win.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Barkod Etiketleri</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { background: white; }
+          .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2px;
+            padding: 4px;
+          }
+          @media print {
+            @page { margin: 2mm; size: 30mm ${Math.ceil(qty / 3) * 32}mm; }
+            body { -webkit-print-color-adjust: exact; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">${labels}</div>
+        <script>
+          window.onload = function() {
+            setTimeout(function() { window.print(); window.close(); }, 500);
+          };
+        </script>
+      </body>
+      </html>
+    `);
+    win.document.close();
+  };
+
+  // Barkod bas butonu handler
+  const handleBarcodePrint = async () => {
+    if (!barcodeModal) return;
+    const qty = Number(barcodeQty);
+    if (!qty || qty <= 0 || qty > 500) return setMessage("Geçerli bir adet girin (1-500).");
+
+    const { item, productName, batchName } = barcodeModal;
+    let barcodeValue = item.barcode || "";
+
+    if (barcodeMode === "yeni") {
+      // Yeni stok girişi: barkod üret, stoğu güncelle
+      barcodeValue = generateBarcode();
+      const { error } = await supabase.from("batch_items")
+        .update({ barcode: barcodeValue, bought: item.bought + qty })
+        .eq("id", item.id);
+      if (error) return showError(error);
+      await logAction("Barkod basıldı (yeni stok)", "batch_items", `${productName} / ${batchName}`, { adet: qty, barcode: barcodeValue });
+    } else {
+      // Sadece tekrar baskı
+      if (!barcodeValue) {
+        barcodeValue = generateBarcode();
+        await supabase.from("batch_items").update({ barcode: barcodeValue }).eq("id", item.id);
+      }
+      await logAction("Barkod tekrar basıldı", "batch_items", `${productName} / ${batchName}`, { adet: qty, barcode: barcodeValue });
+    }
+
+    await printBarcodePDF(barcodeValue, productName, qty);
+    setBarcodeModal(null);
+    setBarcodeQty("");
+    setBarcodeMode("yeni");
     loadAll();
   };
 
@@ -2141,7 +2271,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 });
                 return (
                   <Table
-                    headers={[brTh("batch","Parti"), brTh("depo","Depo"), brTh("product","Ürün"), brTh("bought","Alınan"), brTh("sold","Satılan"), brTh("kalan","Kalan"), brTh("buy_price","Alış"), brTh("sale_price","Satış"), "İşlem"]}
+                    headers={[brTh("batch","Parti"), brTh("depo","Depo"), brTh("product","Ürün"), brTh("bought","Alınan"), brTh("sold","Satılan"), brTh("kalan","Kalan"), brTh("buy_price","Alış"), brTh("sale_price","Satış"), "Barkod", "İşlem"]}
                     rows={sortedItems.map((item) => {
                       const key = item.id;
                       const p = productMap.get(item.product_id);
@@ -2165,6 +2295,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         item.bought - getBatchSoldQtyForItem(item),
                         editingBatchItemId === key ? <input className="input w-24" type="number" value={item.buy_price} onChange={(e) => updateBatchItem(item.id, { buy_price: Number(e.target.value || 0) })} /> : money(item.buy_price),
                         editingBatchItemId === key ? <input className="input w-24" type="number" value={item.sale_price} onChange={(e) => updateBatchItem(item.id, { sale_price: Number(e.target.value || 0) })} /> : money(item.sale_price),
+                        <div key={`bc-${key}`} className="flex flex-col gap-1">
+                          {item.barcode ? <span className="text-xs text-slate-400 font-mono">{item.barcode.substring(0, 12)}...</span> : <span className="text-xs text-slate-300">—</span>}
+                          <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => {
+                            setBarcodeModal({ item, productName: p?.name || "-", batchName: batchMap.get(item.batch_id)?.name || "-" });
+                            setBarcodeQty(String(item.bought));
+                            setBarcodeMode(item.barcode ? "tekrar" : "yeni");
+                          }}>🖨 Barkod Bas</button>
+                        </div>,
                         <div key={key} className="flex gap-2">
                           <button type="button" className="btn-secondary" onClick={() => setEditingBatchItemId(editingBatchItemId === key ? null : key)}>Değiştir</button>
                           <button type="button" className="btn-danger" onClick={() => deleteBatchItem(item)}>Sil</button>
@@ -2175,6 +2313,47 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 );
               })()}
             </Card>
+          </div>
+        )}
+
+        {/* Barkod Modal */}
+        {barcodeModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+              <h3 className="mb-1 text-lg font-bold">🖨 Barkod Bas</h3>
+              <p className="mb-4 text-sm text-slate-500">{barcodeModal.productName} / {barcodeModal.batchName}</p>
+              
+              <div className="mb-4 flex gap-3">
+                <button type="button"
+                  className={`flex-1 rounded-xl border-2 p-3 text-sm font-medium transition ${barcodeMode === "yeni" ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}
+                  onClick={() => setBarcodeMode("yeni")}>
+                  📦 Yeni Stok Girişi<br />
+                  <span className="text-xs font-normal opacity-70">Stok adedi artar + barkod üretilir</span>
+                </button>
+                <button type="button"
+                  className={`flex-1 rounded-xl border-2 p-3 text-sm font-medium transition ${barcodeMode === "tekrar" ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}
+                  onClick={() => setBarcodeMode("tekrar")}>
+                  🔄 Sadece Tekrar Baskı<br />
+                  <span className="text-xs font-normal opacity-70">Stok değişmez, mevcut barkod yeniden basılır</span>
+                </button>
+              </div>
+
+              <div className="mb-4">
+                <label className="mb-1 block text-sm font-medium text-slate-700">Kaç adet etiket basılsın?</label>
+                <input className="input w-full" type="number" min="1" max="500" placeholder="Adet girin" value={barcodeQty} onChange={(e) => setBarcodeQty(e.target.value)} />
+              </div>
+
+              {barcodeModal.item.barcode && (
+                <div className="mb-4 rounded-lg bg-slate-50 p-2 text-xs text-slate-500">
+                  Mevcut barkod: <span className="font-mono">{barcodeModal.item.barcode}</span>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button type="button" className="btn-secondary flex-1" onClick={() => { setBarcodeModal(null); setBarcodeQty(""); }}>İptal</button>
+                <button type="button" className="btn-primary flex-1" onClick={handleBarcodePrint}>Yazdır</button>
+              </div>
+            </div>
           </div>
         )}
 
