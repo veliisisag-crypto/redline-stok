@@ -33,7 +33,16 @@ function AuditSection({ supabase }: { supabase: typeof import("@/lib/supabase").
 
 type GenderCategory = "Kadın" | "Erkek" | "Unisex";
 type SaleType = "Normal satış" | "Fire/Bozuk" | "Hibe";
-type Seller = "Rabia" | "Harun" | "56Kasa";
+type Seller = string;
+
+type AppUser = {
+  id: string;
+  email: string;
+  name: string;
+  role: "admin" | "ortak" | "satici";
+  active: boolean;
+  created_at: string;
+};
 
 type PreorderItem = {
   id: string;
@@ -249,6 +258,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [loadingData, setLoadingData] = useState(true);
   const [message, setMessage] = useState("");
   const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
+  const [currentUserRole, setCurrentUserRole] = useState<"admin" | "ortak" | "satici">("satici");
+  const [currentUserName, setCurrentUserName] = useState<string>("");
+  const [appUsers, setAppUsers] = useState<AppUser[]>([]);
+  // Admin panel state
+  const [newUserForm, setNewUserForm] = useState({ email: "", name: "", role: "satici" as AppUser["role"] });
+  const [userMessage, setUserMessage] = useState("");
 
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -346,8 +361,19 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const { data: userData } = await supabase.auth.getUser();
       const email = userData.user?.email || "";
       setCurrentUserEmail(email);
+
+      // app_users tablosundan rol ve isim çek
+      const { data: appUsersData } = await supabase.from("app_users").select("*").order("name", { ascending: true });
+      const allAppUsers = (appUsersData || []) as AppUser[];
+      setAppUsers(allAppUsers);
+      const currentAppUser = allAppUsers.find((u) => u.email.toLowerCase() === email.toLowerCase());
+      const role = currentAppUser?.role || "satici";
+      const name = currentAppUser?.name || email.split("@")[0];
+      setCurrentUserRole(role);
+      setCurrentUserName(name);
+
       const defaultDepo = email.includes("harun") ? "Türkiş-salon" : "56salon";
-      const defaultSeller: Seller = email.includes("harun") ? "Harun" : "Rabia";
+      const defaultSeller: Seller = name;
       setSaleForm((prev) => ({ ...prev, depo: defaultDepo, seller: defaultSeller }));
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
@@ -594,11 +620,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const recentMovements = useMemo(() => {
     const shortUser = (email?: string, seller?: string) => {
-      if (seller === "Rabia" || seller === "Harun") return seller === "Harun" ? "Harun" : "Rabia";
+      if (seller) return seller;
       if (!email) return "-";
-      if (email.includes("rabia")) return "Rabia";
-      if (email.includes("harun")) return "Harun";
-      if (email.includes("56kasa")) return "56Kasa";
+      const appUser = appUsers.find((u) => u.email.toLowerCase() === email?.toLowerCase());
+      if (appUser) return appUser.name;
       return email.split("@")[0];
     };
 
@@ -1387,7 +1412,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     loadAll();
   };
 
-  const menu = [
+  const allMenuItems: [string, string][] = [
     ["dashboard", "Özet Tablo"],
     ["preorders", "Ön Siparişler"],
     ["products", "Ürünler"],
@@ -1398,7 +1423,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     ["partners", "Parti Maliyet Kaydı"],
     ["period", "Dönem Kapanışı"],
     ["audit", "İşlem Geçmişi"],
+    ["admin", "Kullanıcı Yönetimi"],
   ];
+
+  const menu = allMenuItems.filter(([key]) => {
+    if (currentUserRole === "admin") return true;
+    if (currentUserRole === "ortak") return key !== "admin";
+    // satici: sadece satış ve ön siparişler
+    return ["sales", "preorders"].includes(key);
+  });
 
   const filteredProducts = sortedProducts.filter((p) => `${p.name} ${p.code} ${p.gender_category}`.toLowerCase().includes(search.toLowerCase()));
 
@@ -1546,7 +1579,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           <p className="text-xs text-slate-500">Supabase bağlı sürüm</p>
           {currentUserEmail && (
             <div className="mt-2 rounded-lg bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-700">
-              👤 {currentUserEmail.includes("harun") ? "Harun" : currentUserEmail.includes("rabia") ? "Rabia" : currentUserEmail.includes("56kasa") ? "56Kasa" : currentUserEmail.split("@")[0]}
+              👤 {currentUserName}
             </div>
           )}
         </div>
@@ -1589,7 +1622,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 grid grid-cols-2 gap-2 lg:hidden">
           {currentUserEmail && (
             <div className="col-span-2 rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 text-center">
-              👤 {currentUserEmail.includes("harun") ? "Harun" : currentUserEmail.includes("rabia") ? "Rabia" : currentUserEmail.includes("56kasa") ? "56Kasa" : currentUserEmail.split("@")[0]}
+              👤 {currentUserName}
             </div>
           )}
           {menu.map(([key, label]) => (
@@ -1652,6 +1685,63 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         {active === "audit" && (
           <AuditSection supabase={supabase} />
+        )}
+
+        {active === "admin" && currentUserRole === "admin" && (
+          <div className="space-y-4">
+            <Card title="Kullanıcı Yönetimi">
+              {userMessage && <div className="mb-3 rounded-lg bg-green-50 p-3 text-sm text-green-700">{userMessage}</div>}
+              <Table
+                headers={["İsim", "Email", "Rol", "Durum", "İşlem"]}
+                rows={appUsers.map((u) => [
+                  u.name,
+                  u.email,
+                  u.role === "admin" ? "Admin" : u.role === "ortak" ? "Ortak" : "Satıcı",
+                  u.active ? <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">Aktif</span> : <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">Pasif</span>,
+                  <div className="flex gap-2">
+                    <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={async () => {
+                      await supabase.from("app_users").update({ active: !u.active }).eq("id", u.id);
+                      setAppUsers((prev) => prev.map((x) => x.id === u.id ? { ...x, active: !u.active } : x));
+                      setUserMessage(`${u.name} ${u.active ? "pasife alındı" : "aktife alındı"}.`);
+                      setTimeout(() => setUserMessage(""), 3000);
+                    }}>{u.active ? "Pasife Al" : "Aktife Al"}</button>
+                    <select className="input text-xs py-1" value={u.role} onChange={async (e) => {
+                      const newRole = e.target.value as AppUser["role"];
+                      await supabase.from("app_users").update({ role: newRole }).eq("id", u.id);
+                      setAppUsers((prev) => prev.map((x) => x.id === u.id ? { ...x, role: newRole } : x));
+                      setUserMessage(`${u.name} rolü güncellendi.`);
+                      setTimeout(() => setUserMessage(""), 3000);
+                    }}>
+                      <option value="admin">Admin</option>
+                      <option value="ortak">Ortak</option>
+                      <option value="satici">Satıcı</option>
+                    </select>
+                  </div>
+                ])}
+              />
+            </Card>
+            <Card title="Yeni Kullanıcı Ekle">
+              <div className="grid gap-3 md:grid-cols-4">
+                <input className="input" placeholder="İsim" value={newUserForm.name} onChange={(e) => setNewUserForm({ ...newUserForm, name: e.target.value })} />
+                <input className="input" placeholder="Email" type="email" value={newUserForm.email} onChange={(e) => setNewUserForm({ ...newUserForm, email: e.target.value })} />
+                <select className="input" value={newUserForm.role} onChange={(e) => setNewUserForm({ ...newUserForm, role: e.target.value as AppUser["role"] })}>
+                  <option value="admin">Admin</option>
+                  <option value="ortak">Ortak</option>
+                  <option value="satici">Satıcı</option>
+                </select>
+                <button type="button" className="btn-primary" onClick={async () => {
+                  if (!newUserForm.name || !newUserForm.email) return;
+                  const { data, error } = await supabase.from("app_users").insert({ name: newUserForm.name, email: newUserForm.email, role: newUserForm.role, active: true }).select().single();
+                  if (error) { setUserMessage("Hata: " + error.message); return; }
+                  setAppUsers((prev) => [...prev, data as AppUser]);
+                  setNewUserForm({ email: "", name: "", role: "satici" });
+                  setUserMessage(`${(data as AppUser).name} eklendi. Supabase Authentication'da kullanıcı oluşturmayı unutma!`);
+                  setTimeout(() => setUserMessage(""), 5000);
+                }}>Ekle</button>
+              </div>
+              <p className="mt-2 text-xs text-slate-400">⚠️ Kullanıcı ekledikten sonra Supabase Authentication &gt; Users kısmında aynı email ile hesap oluşturman gerekiyor.</p>
+            </Card>
+          </div>
         )}
 
         {active === "products" && (
@@ -2517,7 +2607,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   );
                 })()}
                 <input className="input" type="number" min="1" placeholder="Adet" value={saleForm.qty} onChange={(e) => setSaleForm({ ...saleForm, qty: e.target.value })} />
-                <select className="input" value={saleForm.seller} onChange={(e) => setSaleForm({ ...saleForm, seller: e.target.value as Seller })}><option>Rabia</option><option>Harun</option><option>56Kasa</option></select>
+                <select className="input" value={saleForm.seller} onChange={(e) => setSaleForm({ ...saleForm, seller: e.target.value as Seller })}>
+                  {appUsers.filter((u) => u.active && u.role !== "admin").map((u) => <option key={u.id}>{u.name}</option>)}
+                </select>
                 <select className="input" value={saleForm.saleType} onChange={(e) => {
                   const t = e.target.value as SaleType;
                   setSaleForm({ ...saleForm, saleType: t, customSalePrice: (t === "Fire/Bozuk" || t === "Hibe") ? "0" : saleForm.customSalePrice });
@@ -2552,7 +2644,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     customerMap.get(sale.customer_id)?.name || "-",
                     productMap.get(sale.product_id)?.name || "-",
                     batchMap.get(sale.batch_id)?.name || "-",
-                    isEditing ? <select key="seller" className="input" value={draft.seller} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], seller: e.target.value as Seller } }))}><option>Rabia</option><option>Harun</option><option>56Kasa</option></select> : sale.seller,
+                    isEditing ? <select key="seller" className="input" value={draft.seller} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], seller: e.target.value as Seller } }))}>
+                        {appUsers.filter((u) => u.active && u.role !== "admin").map((u) => <option key={u.id}>{u.name}</option>)}
+                      </select> : sale.seller,
                     isEditing ? <select key="type" className="input" value={draft.sale_type} onChange={(e) => { const t = e.target.value as SaleType; setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], sale_type: t, total: (t === "Fire/Bozuk" || t === "Hibe") ? "0" : p[sale.id].total } })); }}><option>Normal satış</option><option>Fire/Bozuk</option><option>Hibe</option></select> : sale.sale_type,
                     isEditing ? <input key="qty" className="input" style={{width:64}} type="number" min="1" value={draft.qty} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], qty: e.target.value } }))} /> : sale.qty,
                     isEditing ? <input key="total" className="input" style={{width:100}} type="number" min="0" value={draft.total} onChange={(e) => setSaleDrafts((p) => ({ ...p, [sale.id]: { ...p[sale.id], total: e.target.value } }))} /> : money(sale.total),

@@ -2,8 +2,9 @@ rabia@redline.com    Atakum*56++
 harun@redline.com    İlkadım+55**	
 admin@redline.com    Canik&01-+
 56kasa@redline.com   56Cadde+*55
+anil@redline.com     Türkiş**54& 
 
 
 git add .
-git commit -m "update page.tsx"
+git commit -m "update 2 page.tsx"
 git push
