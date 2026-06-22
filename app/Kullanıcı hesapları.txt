@@ -6,5 +6,5 @@ anil@redline.com     Türkiş**54&
 
 
 git add .
-git commit -m "update 2 page.tsx"
+git commit -m "ön sipariş satışı 3.tsx"
 git push
