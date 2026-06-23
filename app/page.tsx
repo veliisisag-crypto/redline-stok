@@ -2008,10 +2008,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
       <section className="p-5 lg:ml-72 lg:p-8">
         {/* Scroll to top button - top right */}
-        <div style={{position:"fixed", right:"16px", top:"16px", zIndex:99999, display:"flex", gap:8}}>
-          <button type="button" onClick={() => { setScannerOpen(true); setTimeout(startScanner, 300); }} className="rounded-xl border-2 border-blue-400 bg-white px-3 py-2 text-sm font-bold text-blue-600 shadow-2xl">
-            📷 QR Tara
-          </button>
+        <div style={{position:"fixed", right:"16px", top:"16px", zIndex:99999}}>
           <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} className="rounded-xl border-2 border-slate-400 bg-white px-4 py-2 text-sm font-bold text-black shadow-2xl">
             ↑ En Üste
           </button>
