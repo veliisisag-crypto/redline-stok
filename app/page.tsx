@@ -335,6 +335,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   } | null>(null);
   const [barcodeQty, setBarcodeQty] = useState("");
   const [barcodeMode, setBarcodeMode] = useState<"yeni" | "tekrar">("yeni");
+  const [subMenuOpen, setSubMenuOpen] = useState(false);
   // Kamera/tarama state
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scannerError, setScannerError] = useState("");
@@ -347,6 +348,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [barcodeCheckResult, setBarcodeCheckResult] = useState<{ found: boolean; productName?: string; batchName?: string; depo?: string; barcode?: string } | null>(null);
   const barcodeCheckVideoRef = useRef<HTMLVideoElement>(null);
   const barcodeCheckControlsRef = useRef<{ stop: () => void } | null>(null);
+  // Kameradan resim çek
+  const [photoCaptureTarget, setPhotoCaptureTarget] = useState<"newProduct" | string | null>(null); // string = productId
+  const photoCaptureRef = useRef<HTMLInputElement>(null);
   const [batchReportSort, setBatchReportSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "batch", dir: "asc"});
   const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "56salon" });
   const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Rabia" as Seller, saleType: "Normal satış" as SaleType, customSalePrice: "", depo: "56salon" });
@@ -714,13 +718,44 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       .slice(0, 100);
   }, [activeSales, activePayments, auditLogs, customerMap, productMap, batchMap]);
 
+  // Resmi max 100KB olacak şekilde sıkıştır
+  const resizeImage = (base64: string, maxKB = 100): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let { width, height } = img;
+        // Max 800px ile başla
+        const MAX_DIM = 800;
+        if (width > MAX_DIM || height > MAX_DIM) {
+          if (width > height) { height = Math.round(height * MAX_DIM / width); width = MAX_DIM; }
+          else { width = Math.round(width * MAX_DIM / height); height = MAX_DIM; }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0, width, height);
+        // Kaliteyi düşürerek hedef boyuta ulaş
+        let quality = 0.85;
+        let result = canvas.toDataURL("image/jpeg", quality);
+        while (result.length > maxKB * 1024 * 1.37 && quality > 0.1) {
+          quality -= 0.1;
+          result = canvas.toDataURL("image/jpeg", quality);
+        }
+        resolve(result);
+      };
+      img.src = base64;
+    });
+  };
+
   const uploadImageToStorage = async (base64: string, fileName: string): Promise<string | null> => {
     try {
-      const res = await fetch(base64);
+      // Önce resize et
+      const resized = await resizeImage(base64, 100);
+      const res = await fetch(resized);
       const blob = await res.blob();
-      const ext = blob.type.split("/")[1] || "jpg";
-      const path = `${fileName}-${Date.now()}.${ext}`;
-      const { error } = await supabase.storage.from("product-images").upload(path, blob, { upsert: true, contentType: blob.type });
+      const path = `${fileName}-${Date.now()}.jpg`;
+      const { error } = await supabase.storage.from("product-images").upload(path, blob, { upsert: true, contentType: "image/jpeg" });
       if (error) { showError(error); return null; }
       const { data } = supabase.storage.from("product-images").getPublicUrl(path);
       return data.publicUrl;
@@ -1715,25 +1750,37 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     loadAll();
   };
 
-  const allMenuItems: [string, string][] = [
-    ["dashboard", "Özet Tablo"],
+  const subMenuItems: [string, string][] = [
     ["preorders", "Ön Siparişler"],
-    ["products", "Ürünler"],
-    ["gallery", "Toplu Ürün Resimleri"],
     ["batchEntry", "Parti/Ürün Girişi"],
-    ["customers", "Müşteriler / Cari"],
-    ["sales", "Satışlar"],
     ["partners", "Parti Maliyet Kaydı"],
     ["period", "Dönem Kapanışı"],
-    ["audit", "İşlem Geçmişi"],
     ["admin", "Kullanıcı Yönetimi"],
+    ["audit", "İşlem Geçmişi"],
   ];
 
-  const menu = allMenuItems.filter(([key]) => {
+  const mainMenuItems: [string, string][] = [
+    ["dashboard", "Özet Tablo"],
+    ["products", "Ürünler"],
+    ["customers", "Müşteriler"],
+    ["sales", "Satışlar"],
+  ];
+
+  const allMenuItems: [string, string][] = [
+    ...mainMenuItems,
+    ...subMenuItems,
+    ["gallery", "Toplu Ürün Resimleri"],
+  ];
+
+  const menu = mainMenuItems.filter(([key]) => {
+    if (currentUserRole === "admin" || currentUserRole === "ortak") return true;
+    return ["sales"].includes(key);
+  });
+
+  const subMenu = subMenuItems.filter(([key]) => {
     if (currentUserRole === "admin") return true;
     if (currentUserRole === "ortak") return key !== "admin";
-    // satici: sadece satış ve ön siparişler
-    return ["sales", "preorders"].includes(key);
+    return ["preorders"].includes(key);
   });
 
   const filteredProducts = sortedProducts.filter((p) => `${p.name} ${p.code}`.toLowerCase().includes(search.toLowerCase()));
@@ -1892,6 +1939,23 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               {label}
             </button>
           ))}
+          {subMenu.length > 0 && (
+            <div>
+              <button type="button" onClick={() => setSubMenuOpen((v) => !v)} className={`w-full rounded-xl px-4 py-3 text-left flex items-center justify-between ${subMenu.some(([k]) => k === active) ? "bg-slate-900 text-white" : "hover:bg-slate-100"}`}>
+                <span>Alt İşlemler</span>
+                <span>{subMenuOpen ? "▲" : "▼"}</span>
+              </button>
+              {subMenuOpen && (
+                <div className="ml-3 mt-1 space-y-1 border-l-2 border-slate-200 pl-3">
+                  {subMenu.map(([key, label]) => (
+                    <button key={key} type="button" onClick={() => { setActive(key); setSubMenuOpen(false); }} className={`w-full rounded-xl px-3 py-2 text-left text-sm ${active === key ? "bg-slate-800 text-white" : "hover:bg-slate-100"}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <button type="button" onClick={onLogout} className="w-full rounded-xl px-4 py-3 text-left text-red-600 hover:bg-red-50 font-semibold">
             Çıkış
           </button>
@@ -1900,9 +1964,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
       <section className="p-5 lg:ml-72 lg:p-8">
         {/* Scroll to top button - top right */}
-        <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} style={{position:"fixed", right:"16px", top:"16px", zIndex:99999}} className="rounded-xl border-2 border-slate-400 bg-white px-4 py-2 text-sm font-bold text-black shadow-2xl">
-          ↑ En Üste
-        </button>
+        <div style={{position:"fixed", right:"16px", top:"16px", zIndex:99999, display:"flex", gap:8}}>
+          <button type="button" onClick={() => { setScannerOpen(true); setTimeout(startScanner, 300); }} className="rounded-xl border-2 border-blue-400 bg-white px-3 py-2 text-sm font-bold text-blue-600 shadow-2xl">
+            📷 QR Tara
+          </button>
+          <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} className="rounded-xl border-2 border-slate-400 bg-white px-4 py-2 text-sm font-bold text-black shadow-2xl">
+            ↑ En Üste
+          </button>
+        </div>
 
         {loadingData && (
           <div style={{position:"fixed",top:0,left:0,right:0,height:3,zIndex:99998,background:"linear-gradient(90deg,#0f172a 0%,#64748b 50%,#0f172a 100%)",backgroundSize:"200% 100%",animation:"loadbar 1.2s linear infinite"}} />
@@ -1933,8 +2002,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               {label}
             </button>
           ))}
-          <button type="button" onClick={onLogout} className="rounded-xl px-3 py-2 bg-white text-red-600 font-semibold col-span-2">
+          {subMenu.length > 0 && (
+            <button type="button" onClick={() => setSubMenuOpen((v) => !v)} className={`rounded-xl px-3 py-2 col-span-2 ${subMenu.some(([k]) => k === active) ? "bg-slate-900 text-white" : "bg-white"}`}>
+              Alt İşlemler {subMenuOpen ? "▲" : "▼"}
+            </button>
+          )}
+          {subMenuOpen && subMenu.map(([key, label]) => (
+            <button key={key} type="button" onClick={() => { setActive(key); setSubMenuOpen(false); }} className={`rounded-xl px-3 py-2 text-sm ${active === key ? "bg-slate-800 text-white" : "bg-slate-50"}`}>
+              {label}
+            </button>
+          ))}
+          <button type="button" onClick={onLogout} className="rounded-xl px-3 py-2 bg-white text-red-600 font-semibold col-span-1">
             Çıkış
+          </button>
+          <button type="button" onClick={() => { setScannerOpen(true); setTimeout(startScanner, 300); }} className="rounded-xl px-3 py-2 bg-blue-50 text-blue-600 font-semibold col-span-1">
+            📷 QR Tara
           </button>
         </div>
 
@@ -2101,7 +2183,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         <option value="">-- Ürün Türü Seç * --</option>
                         {productTypes.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
-                      <label className="input cursor-pointer text-center">Resim Seç<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => setNewProduct((prev) => ({ ...prev, image: String(reader.result || "") })); reader.readAsDataURL(file); }} /></label>
+                      <div className="flex gap-2">
+                        <label className="input flex-1 cursor-pointer text-center text-sm">📁 Dosya<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = async () => { const resized = await resizeImage(String(reader.result || "")); setNewProduct((prev) => ({ ...prev, image: resized })); }; reader.readAsDataURL(file); }} /></label>
+                        <label className="input flex-1 cursor-pointer text-center text-sm">📷 Kamera<input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = async () => { const resized = await resizeImage(String(reader.result || "")); setNewProduct((prev) => ({ ...prev, image: resized })); }; reader.readAsDataURL(file); }} /></label>
+                      </div>
                       <button type="button" className="btn" onClick={addProductDefinition}>Kaynak Ürün Ekle</button>
                     </div>
                     {newProduct.image ? <img src={newProduct.image} alt="Önizleme" className="mt-4 h-24 w-24 rounded-xl border object-cover" /> : null}
@@ -2165,13 +2250,27 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                 </div>
                                 <label className="product-img-change-btn">
                                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-                                  Resim Değiştir
+                                  📁 Dosya
                                   <input type="file" accept="image/*" className="hidden" onChange={(e) => {
                                     const file = e.target.files?.[0];
                                     if (!file) return;
                                     const reader = new FileReader();
-                                    reader.onload = () => {
-                                      const b64 = String(reader.result || "");
+                                    reader.onload = async () => {
+                                      const b64 = await resizeImage(String(reader.result || ""));
+                                      pendingImageRef.current[p.id] = b64;
+                                      setProductDrafts((prev) => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), image_url: b64 } }));
+                                    };
+                                    reader.readAsDataURL(file);
+                                  }} />
+                                </label>
+                                <label className="product-img-change-btn">
+                                  📷 Kamera
+                                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    const reader = new FileReader();
+                                    reader.onload = async () => {
+                                      const b64 = await resizeImage(String(reader.result || ""));
                                       pendingImageRef.current[p.id] = b64;
                                       setProductDrafts((prev) => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), image_url: b64 } }));
                                     };
