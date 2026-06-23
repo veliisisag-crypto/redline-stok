@@ -351,6 +351,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   // Kameradan resim çek
   const [photoCaptureTarget, setPhotoCaptureTarget] = useState<"newProduct" | string | null>(null); // string = productId
   const photoCaptureRef = useRef<HTMLInputElement>(null);
+  const photoVideoRef = useRef<HTMLVideoElement>(null);
+  const photoStreamRef = useRef<MediaStream | null>(null);
   const [batchReportSort, setBatchReportSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "batch", dir: "asc"});
   const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "56salon" });
   const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Rabia" as Seller, saleType: "Normal satış" as SaleType, customSalePrice: "", depo: "56salon" });
@@ -925,6 +927,48 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "", depo: "56salon" });
     setMessage("Parti ürün kaydı eklendi.");
     loadAll();
+  };
+
+  // Kameradan fotoğraf çekme
+  const openPhotoCapture = async (target: "newProduct" | string) => {
+    setPhotoCaptureTarget(target);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      photoStreamRef.current = stream;
+      setTimeout(() => {
+        if (photoVideoRef.current) {
+          photoVideoRef.current.srcObject = stream;
+          photoVideoRef.current.play();
+        }
+      }, 100);
+    } catch {
+      setMessage("Kamera açılamadı. İzin verdiğinizden emin olun.");
+      setPhotoCaptureTarget(null);
+    }
+  };
+
+  const capturePhoto = async () => {
+    if (!photoVideoRef.current || !photoCaptureTarget) return;
+    const video = photoVideoRef.current;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d")!.drawImage(video, 0, 0);
+    const base64 = canvas.toDataURL("image/jpeg", 0.9);
+    const resized = await resizeImage(base64);
+    if (photoCaptureTarget === "newProduct") {
+      setNewProduct((prev) => ({ ...prev, image: resized }));
+    } else {
+      pendingImageRef.current[photoCaptureTarget] = resized;
+      setProductDrafts((prev) => ({ ...prev, [photoCaptureTarget]: { ...(prev[photoCaptureTarget] || {}), image_url: resized } }));
+    }
+    closePhotoCapture();
+  };
+
+  const closePhotoCapture = () => {
+    photoStreamRef.current?.getTracks().forEach((t) => t.stop());
+    photoStreamRef.current = null;
+    setPhotoCaptureTarget(null);
   };
 
   // QR önizleme göster
@@ -2183,9 +2227,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         <option value="">-- Ürün Türü Seç * --</option>
                         {productTypes.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
-                      <div className="flex gap-2">
-                        <label className="input flex-1 cursor-pointer text-center text-sm">📁 Dosya<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = async () => { const resized = await resizeImage(String(reader.result || "")); setNewProduct((prev) => ({ ...prev, image: resized })); }; reader.readAsDataURL(file); }} /></label>
-                        <label className="input flex-1 cursor-pointer text-center text-sm">📷 Kamera<input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = async () => { const resized = await resizeImage(String(reader.result || "")); setNewProduct((prev) => ({ ...prev, image: resized })); }; reader.readAsDataURL(file); }} /></label>
+                      <div className="flex flex-col gap-2">
+                        <label className="input cursor-pointer text-center text-sm">📁 Dosya Seç<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = async () => { const resized = await resizeImage(String(reader.result || "")); setNewProduct((prev) => ({ ...prev, image: resized })); }; reader.readAsDataURL(file); }} /></label>
+                        <button type="button" className="input cursor-pointer text-center text-sm" onClick={() => openPhotoCapture("newProduct")}>📷 Kameradan Çek</button>
                       </div>
                       <button type="button" className="btn" onClick={addProductDefinition}>Kaynak Ürün Ekle</button>
                     </div>
@@ -2249,7 +2293,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                   )}
                                 </div>
                                 <label className="product-img-change-btn">
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
                                   📁 Dosya
                                   <input type="file" accept="image/*" className="hidden" onChange={(e) => {
                                     const file = e.target.files?.[0];
@@ -2263,20 +2306,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                     reader.readAsDataURL(file);
                                   }} />
                                 </label>
-                                <label className="product-img-change-btn">
-                                  📷 Kamera
-                                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    if (!file) return;
-                                    const reader = new FileReader();
-                                    reader.onload = async () => {
-                                      const b64 = await resizeImage(String(reader.result || ""));
-                                      pendingImageRef.current[p.id] = b64;
-                                      setProductDrafts((prev) => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), image_url: b64 } }));
-                                    };
-                                    reader.readAsDataURL(file);
-                                  }} />
-                                </label>
+                                <button type="button" className="product-img-change-btn" onClick={() => openPhotoCapture(p.id)}>
+                                  📷 Kameradan Çek
+                                </button>
                               </div>
                               <div className="product-edit-fields">
                                 <label className="field-label"><span>Ürün adı</span><input className="input" maxLength={50} value={String(draft.name ?? p.name)} onChange={(e) => setProductDrafts({ ...productDrafts, [p.id]: { ...(productDrafts[p.id] || {}), name: e.target.value } })} /></label>
@@ -2610,6 +2642,24 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 );
               })()}
             </Card>
+          </div>
+        )}
+
+        {/* Fotoğraf Çekme Modalı */}
+        {photoCaptureTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
+            <div className="w-full max-w-sm rounded-2xl bg-black p-4 shadow-xl">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-lg font-bold text-white">📷 Fotoğraf Çek</h3>
+                <button type="button" className="rounded-full bg-white/20 px-3 py-1 text-sm text-white" onClick={closePhotoCapture}>Kapat</button>
+              </div>
+              <div className="relative overflow-hidden rounded-xl" style={{aspectRatio:"4/3"}}>
+                <video ref={photoVideoRef} className="h-full w-full object-cover" autoPlay playsInline muted />
+              </div>
+              <button type="button" className="mt-3 w-full rounded-xl bg-white py-3 text-lg font-bold text-black" onClick={capturePhoto}>
+                📸 Çek
+              </button>
+            </div>
           </div>
         )}
 
