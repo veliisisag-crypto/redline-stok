@@ -73,6 +73,7 @@ type Product = {
   image_url: string | null;
   passive: boolean;
   type_id: string | null;
+  barcode: string | null;
 };
 
 type Customer = {
@@ -415,7 +416,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       setBatchForm((prev) => ({ ...prev, depo: defaultDepo }));
 
       const [productsRes, customersRes, batchesRes, batchItemsRes, salesRes, paymentsRes, partnersRes, periodsRes, batchCostsRes, preordersRes, preorderItemsRes, paymentAllocationsRes, productTypesRes] = await Promise.all([
-        supabase.from("products").select("id,name,code,image_url,passive,type_id").order("created_at", { ascending: true }),
+        supabase.from("products").select("id,name,code,image_url,passive,type_id,barcode").order("created_at", { ascending: true }),
         supabase.from("customers").select("*").order("created_at", { ascending: true }),
         supabase.from("batches").select("*").order("created_at", { ascending: true }),
         supabase.from("batch_items").select("*").order("created_at", { ascending: true }),
@@ -749,6 +750,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       code,
       image_url: imageUrl,
       type_id: newProduct.typeId,
+      barcode: generateBarcode(),
     });
     if (error) return showError(error);
     await logAction("Ürün eklendi", "products", name, { code });
@@ -912,14 +914,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         (result) => {
           if (result) {
             const barcodeValue = result.getText();
-            const item = batchItems.find((i) => i.barcode === barcodeValue);
-            if (item) {
-              const product = products.find((p) => p.id === item.product_id);
+            const product = products.find((p) => p.barcode === barcodeValue);
+            if (product) {
+              const item = batchItems.find((i) => i.product_id === product.id);
               setBarcodeCheckResult({
                 found: true,
-                productName: product?.name || "-",
-                batchName: batchMap.get(item.batch_id)?.name || "-",
-                depo: item.depo || "-",
+                productName: product.name,
+                batchName: item ? batchMap.get(item.batch_id)?.name || "-" : "-",
+                depo: item?.depo || "-",
                 barcode: barcodeValue,
               });
             } else {
@@ -994,23 +996,19 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   // Taranan barkodu işle
   const handleBarcodeScanned = (barcodeValue: string) => {
-    // batch_items içinde barkodu ara
-    const item = batchItems.find((i) => i.barcode === barcodeValue);
-    if (!item) {
+    // products tablosunda barkodu ara
+    const product = products.find((p) => p.barcode === barcodeValue);
+    if (!product) {
       setMessage(`Barkod bulunamadı: ${barcodeValue}`);
       return;
     }
-    const product = products.find((p) => p.id === item.product_id);
-    if (!product) {
-      setMessage("Ürün bulunamadı.");
-      return;
-    }
-    // Satış formuna otomatik doldur
+    // O ürünün stoklu batch_item'ını bul
+    const item = batchItems.find((i) => i.product_id === product.id && (i.bought - getBatchSoldQtyForItem(i)) > 0);
     setSaleForm((prev) => ({
       ...prev,
       productId: product.id,
-      batchId: item.id,
-      depo: item.depo || prev.depo,
+      batchId: item?.id || "",
+      depo: item?.depo || prev.depo,
     }));
     setMessage(`✅ ${product.name} seçildi — adet ve müşteri girin.`);
   };
@@ -1110,22 +1108,26 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (!qty || qty <= 0 || qty > 500) return setMessage("Geçerli bir adet girin (1-500).");
 
     const { item, productName, batchName } = barcodeModal;
-    let barcodeValue = item.barcode || "";
+
+    // Ürünün barkodunu products tablosundan al
+    const product = products.find((p) => p.id === item.product_id);
+    let barcodeValue = product?.barcode || "";
+
+    if (!barcodeValue) {
+      // Barkod yoksa üret ve products tablosuna kaydet
+      barcodeValue = generateBarcode();
+      await supabase.from("products").update({ barcode: barcodeValue }).eq("id", item.product_id);
+      setProducts((prev) => prev.map((p) => p.id === item.product_id ? { ...p, barcode: barcodeValue } : p));
+    }
 
     if (barcodeMode === "yeni") {
-      // Yeni stok girişi: barkod üret, stoğu güncelle
-      barcodeValue = generateBarcode();
+      // Yeni stok girişi: sadece stoğu güncelle (barkod products'ta)
       const { error } = await supabase.from("batch_items")
-        .update({ barcode: barcodeValue, bought: item.bought + qty })
+        .update({ bought: item.bought + qty })
         .eq("id", item.id);
       if (error) return showError(error);
       await logAction("Barkod basıldı (yeni stok)", "batch_items", `${productName} / ${batchName}`, { adet: qty, barcode: barcodeValue });
     } else {
-      // Sadece tekrar baskı
-      if (!barcodeValue) {
-        barcodeValue = generateBarcode();
-        await supabase.from("batch_items").update({ barcode: barcodeValue }).eq("id", item.id);
-      }
       await logAction("Barkod tekrar basıldı", "batch_items", `${productName} / ${batchName}`, { adet: qty, barcode: barcodeValue });
     }
 
@@ -2284,10 +2286,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                   Satış Detayı
                                 </button>
                                 <button type="button" className="product-btn product-btn--secondary" onClick={async () => {
-                                  const items = batchItems.filter((i) => i.product_id === p.id && i.barcode);
-                                  if (!items.length) return setMessage("Bu ürüne ait barkod yok. Önce barkod basın.");
-                                  const item = items[items.length - 1];
-                                  await showQrPreview(p.name, item.barcode!);
+                                  if (!p.barcode) return setMessage("Bu ürüne ait barkod yok.");
+                                  await showQrPreview(p.name, p.barcode);
                                 }}>
                                   🔳 QR Göster
                                 </button>
@@ -2298,7 +2298,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                     const item = items[0];
                                     setBarcodeModal({ item, productName: p.name, batchName: batchMap.get(item.batch_id)?.name || "-" });
                                     setBarcodeQty(String(item.bought));
-                                    setBarcodeMode(item.barcode ? "tekrar" : "yeni");
+                                    setBarcodeMode("yeni");
                                   } else {
                                     // Birden fazla parti var, kullanıcıya seçtir
                                     const options = items.map((i) => `${batchMap.get(i.batch_id)?.name || i.batch_id} (${i.depo || "?"}, ${i.bought} adet)`).join("\n");
@@ -2313,7 +2313,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                     })();
                                     setBarcodeModal({ item: chosen, productName: p.name, batchName: batchMap.get(chosen.batch_id)?.name || "-" });
                                     setBarcodeQty(String(chosen.bought));
-                                    setBarcodeMode(chosen.barcode ? "tekrar" : "yeni");
+                                    setBarcodeMode("yeni");
                                   }
                                 }}>
                                   🖨 Barkod Bas
@@ -2498,7 +2498,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => {
                             setBarcodeModal({ item, productName: p?.name || "-", batchName: batchMap.get(item.batch_id)?.name || "-" });
                             setBarcodeQty(String(item.bought));
-                            setBarcodeMode(item.barcode ? "tekrar" : "yeni");
+                            setBarcodeMode("yeni");
                           }}>🖨 Barkod Bas</button>
                         </div>,
                         <div key={key} className="flex gap-2">
