@@ -340,6 +340,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [scanning, setScanning] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const scannerControlsRef = useRef<{ stop: () => void } | null>(null);
+  // QR önizleme ve barkod kontrol
+  const [qrPreview, setQrPreview] = useState<{ productName: string; barcode: string; dataUrl: string } | null>(null);
+  const [barcodeCheckOpen, setBarcodeCheckOpen] = useState(false);
+  const [barcodeCheckResult, setBarcodeCheckResult] = useState<{ found: boolean; productName?: string; batchName?: string; depo?: string; barcode?: string } | null>(null);
+  const barcodeCheckVideoRef = useRef<HTMLVideoElement>(null);
+  const barcodeCheckControlsRef = useRef<{ stop: () => void } | null>(null);
   const [batchReportSort, setBatchReportSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "batch", dir: "asc"});
   const [batchForm, setBatchForm] = useState({ batchId: "", productId: "", bought: "", buyPrice: "", salePrice: "", depo: "56salon" });
   const [saleForm, setSaleForm] = useState({ customerId: "", productId: "", batchId: "", qty: "1", seller: "Rabia" as Seller, saleType: "Normal satış" as SaleType, customSalePrice: "", depo: "56salon" });
@@ -882,6 +888,64 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "", depo: "56salon" });
     setMessage("Parti ürün kaydı eklendi.");
     loadAll();
+  };
+
+  // QR önizleme göster
+  const showQrPreview = async (productName: string, barcode: string) => {
+    const QRCode = (await import("qrcode")).default;
+    const canvas = document.createElement("canvas");
+    await QRCode.toCanvas(canvas, barcode, { width: 300, margin: 2 });
+    setQrPreview({ productName, barcode, dataUrl: canvas.toDataURL("image/png") });
+  };
+
+  // Barkod kontrol tarayıcısını başlat
+  const startBarcodeCheck = async () => {
+    setBarcodeCheckResult(null);
+    try {
+      const { BrowserMultiFormatReader } = await import("@zxing/browser");
+      const codeReader = new BrowserMultiFormatReader();
+      const videoEl = barcodeCheckVideoRef.current;
+      if (!videoEl) return;
+      const controls = await codeReader.decodeFromConstraints(
+        { video: { facingMode: "environment" } },
+        videoEl,
+        (result) => {
+          if (result) {
+            const barcodeValue = result.getText();
+            const item = batchItems.find((i) => i.barcode === barcodeValue);
+            if (item) {
+              const product = products.find((p) => p.id === item.product_id);
+              setBarcodeCheckResult({
+                found: true,
+                productName: product?.name || "-",
+                batchName: batchMap.get(item.batch_id)?.name || "-",
+                depo: item.depo || "-",
+                barcode: barcodeValue,
+              });
+            } else {
+              setBarcodeCheckResult({ found: false, barcode: barcodeValue });
+            }
+            controls.stop();
+            barcodeCheckControlsRef.current = null;
+          }
+        }
+      );
+      barcodeCheckControlsRef.current = controls;
+    } catch {
+      setBarcodeCheckResult({ found: false, barcode: "Kamera açılamadı" });
+    }
+  };
+
+  const stopBarcodeCheck = () => {
+    try { barcodeCheckControlsRef.current?.stop(); } catch {}
+    barcodeCheckControlsRef.current = null;
+    if (barcodeCheckVideoRef.current?.srcObject) {
+      const stream = barcodeCheckVideoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach((t) => t.stop());
+      barcodeCheckVideoRef.current.srcObject = null;
+    }
+    setBarcodeCheckOpen(false);
+    setBarcodeCheckResult(null);
   };
 
   // Kamera tarayıcıyı başlat
@@ -2017,6 +2081,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <div className="product-page-header">
                 <h2 className="product-page-title">Ürün Listesi ve Stok Özeti</h2>
                 <div style={{display:"flex", gap:8}}>
+                  <button type="button" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => { setBarcodeCheckOpen(true); setTimeout(startBarcodeCheck, 300); }}>🔍 Barkod Kontrol</button>
                   <button type="button" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px"}} onClick={() => setActive("gallery")}>🖼 Toplu Resimler</button>
                   <a href="/galeri" target="_blank" rel="noopener noreferrer" className="btn-secondary" style={{fontSize:"0.8rem", padding:"6px 12px", textDecoration:"none"}}>🔗 Paylaşım Linki</a>
                 </div>
@@ -2217,6 +2282,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                 <button type="button" className="product-btn product-btn--secondary" onClick={() => setSalesModalProductId(p.id)}>
                                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                                   Satış Detayı
+                                </button>
+                                <button type="button" className="product-btn product-btn--secondary" onClick={async () => {
+                                  const items = batchItems.filter((i) => i.product_id === p.id && i.barcode);
+                                  if (!items.length) return setMessage("Bu ürüne ait barkod yok. Önce barkod basın.");
+                                  const item = items[items.length - 1];
+                                  await showQrPreview(p.name, item.barcode!);
+                                }}>
+                                  🔳 QR Göster
                                 </button>
                                 <button type="button" className="product-btn product-btn--secondary" onClick={() => {
                                   const items = batchItems.filter((i) => i.product_id === p.id);
@@ -2438,6 +2511,60 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 );
               })()}
             </Card>
+          </div>
+        )}
+
+        {/* QR Önizleme Modalı */}
+        {qrPreview && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setQrPreview(null)}>
+            <div className="w-full max-w-xs rounded-2xl bg-white p-6 shadow-xl text-center" onClick={(e) => e.stopPropagation()}>
+              <h3 className="mb-1 font-bold text-lg">{qrPreview.productName}</h3>
+              <p className="mb-4 text-xs text-slate-400 font-mono">{qrPreview.barcode}</p>
+              <img src={qrPreview.dataUrl} alt="QR" className="mx-auto rounded-xl" style={{width:240, height:240}} />
+              <p className="mt-3 text-xs text-slate-400">Ekrandan okutabilir veya barkod bas butonunu kullanabilirsiniz</p>
+              <button type="button" className="btn-secondary mt-4 w-full" onClick={() => setQrPreview(null)}>Kapat</button>
+            </div>
+          </div>
+        )}
+
+        {/* Barkod Kontrol Modalı */}
+        {barcodeCheckOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
+            <div className="w-full max-w-sm rounded-2xl bg-black p-4 shadow-xl">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-lg font-bold text-white">🔍 Barkod Kontrol</h3>
+                <button type="button" className="rounded-full bg-white/20 px-3 py-1 text-sm text-white" onClick={stopBarcodeCheck}>Kapat</button>
+              </div>
+              {!barcodeCheckResult ? (
+                <div className="relative overflow-hidden rounded-xl" style={{aspectRatio:"1/1"}}>
+                  <video ref={barcodeCheckVideoRef} className="h-full w-full object-cover" autoPlay playsInline muted />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="h-48 w-48 rounded-2xl border-4 border-white/60" style={{boxShadow:"0 0 0 9999px rgba(0,0,0,0.5)"}} />
+                  </div>
+                  <div className="absolute bottom-4 left-0 right-0 text-center text-sm text-white/80">QR kodu çerçeve içine alın...</div>
+                </div>
+              ) : (
+                <div className={`rounded-xl p-5 ${barcodeCheckResult.found ? "bg-green-900/50" : "bg-red-900/50"}`}>
+                  {barcodeCheckResult.found ? (
+                    <>
+                      <div className="text-2xl text-center mb-3">✅</div>
+                      <div className="text-white font-bold text-lg text-center mb-2">{barcodeCheckResult.productName}</div>
+                      <div className="text-green-300 text-sm text-center">Parti: {barcodeCheckResult.batchName}</div>
+                      <div className="text-green-300 text-sm text-center">Depo: {barcodeCheckResult.depo}</div>
+                      <div className="text-green-200/50 text-xs text-center mt-2 font-mono">{barcodeCheckResult.barcode}</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-2xl text-center mb-3">❌</div>
+                      <div className="text-red-300 text-center">Sistemde kayıtlı barkod bulunamadı</div>
+                      <div className="text-red-200/50 text-xs text-center mt-2 font-mono">{barcodeCheckResult.barcode}</div>
+                    </>
+                  )}
+                  <button type="button" className="mt-4 w-full rounded-xl bg-white/20 py-2 text-white text-sm" onClick={() => { setBarcodeCheckResult(null); setTimeout(startBarcodeCheck, 300); }}>Tekrar Tara</button>
+                  <button type="button" className="mt-2 w-full rounded-xl bg-white/10 py-2 text-white/70 text-sm" onClick={stopBarcodeCheck}>Kapat</button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
