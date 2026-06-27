@@ -1103,21 +1103,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const printBarcodePDF = async (barcodeValue: string, productName: string, qty: number) => {
     const QRCode = (await import("qrcode")).default;
 
-    // QR canvas oluştur
-    const qrCanvas = document.createElement("canvas");
-    await QRCode.toCanvas(qrCanvas, barcodeValue, {
-      width: 200, margin: 1,
-      color: { dark: "#000000", light: "#ffffff" },
-    });
-    const qrDataUrl = qrCanvas.toDataURL("image/png");
+    // 300 DPI için: 30mm = ~354px
+    const labelSize = 354;
+    const qrSize = 260;
 
-    // Her etiket için 30x30mm canvas çiz (113x113px @96dpi)
-    const labelSize = 113;
-    const cols = 3;
-    const rows = Math.ceil(qty / cols);
-    const gap = 4;
-    const totalW = cols * labelSize + (cols - 1) * gap + 8;
-    const totalH = rows * labelSize + (rows - 1) * gap + 8;
+    // Her etiket için ayrı canvas — tek sütun, dikey dizili
+    const cols = 1;
+    const rows = qty;
+    const gap = 8;
+    const padding = 10;
+    const totalW = labelSize + padding * 2;
+    const totalH = rows * labelSize + (rows - 1) * gap + padding * 2;
 
     const sheetCanvas = document.createElement("canvas");
     sheetCanvas.width = totalW;
@@ -1126,46 +1122,58 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, totalW, totalH);
 
+    // QR kod üret — yüksek çözünürlük
+    const qrCanvas = document.createElement("canvas");
+    await QRCode.toCanvas(qrCanvas, barcodeValue, {
+      width: qrSize,
+      margin: 1,
+      errorCorrectionLevel: "H",
+      color: { dark: "#000000", light: "#ffffff" },
+    });
     const qrImg = new Image();
-    qrImg.src = qrDataUrl;
+    qrImg.src = qrCanvas.toDataURL("image/png");
     await new Promise((res) => { qrImg.onload = res; });
 
     for (let i = 0; i < qty; i++) {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      const x = 4 + col * (labelSize + gap);
-      const y = 4 + row * (labelSize + gap);
+      const x = padding;
+      const y = padding + i * (labelSize + gap);
+      const cx = x + labelSize / 2;
+      const cy = y + labelSize / 2;
 
       // Yuvarlak zemin
       ctx.save();
       ctx.beginPath();
-      ctx.arc(x + labelSize/2, y + labelSize/2, labelSize/2, 0, Math.PI * 2);
-      ctx.clip();
+      ctx.arc(cx, cy, labelSize / 2, 0, Math.PI * 2);
       ctx.fillStyle = "#ffffff";
-      ctx.fillRect(x, y, labelSize, labelSize);
+      ctx.fill();
+      ctx.strokeStyle = "#dddddd";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.clip();
 
-      // QR kod
-      ctx.drawImage(qrImg, x + 7, y + 5, 85, 85);
+      // QR kodu ortala — üstte
+      const qrX = cx - qrSize / 2;
+      const qrY = y + 20;
+      ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
 
       // Ürün adı
-      ctx.font = "bold 7px Arial";
+      ctx.font = "bold 22px Arial";
       ctx.fillStyle = "#000000";
       ctx.textAlign = "center";
-      const shortName = productName.length > 18 ? productName.substring(0, 18) + "…" : productName;
-      ctx.fillText(shortName, x + labelSize/2, y + 96);
+      const shortName = productName.length > 20 ? productName.substring(0, 20) + "…" : productName;
+      ctx.fillText(shortName, cx, qrY + qrSize + 30);
 
-      // Barkod değeri
-      ctx.font = "6px monospace";
-      ctx.fillStyle = "#666666";
-      ctx.fillText(barcodeValue.substring(0, 16), x + labelSize/2, y + 108);
+      // Barkod kodu
+      ctx.font = "16px monospace";
+      ctx.fillStyle = "#888888";
+      ctx.fillText(barcodeValue.substring(0, 18), cx, qrY + qrSize + 54);
 
       ctx.restore();
     }
 
-    // Canvas'ı blob'a çevir
-    const blob = await new Promise<Blob>((res) => sheetCanvas.toBlob((b) => res(b!), "image/png"));
+    const blob = await new Promise<Blob>((res) => sheetCanvas.toBlob((b) => res(b!), "image/png", 1.0));
 
-    // Web Share API varsa paylaş (mobil)
+    // Web Share API — mobilde paylaş
     if (navigator.share && navigator.canShare?.({ files: [new File([blob], "barkod.png", { type: "image/png" })] })) {
       const file = new File([blob], `barkod-${productName.substring(0, 15)}.png`, { type: "image/png" });
       try {
@@ -1174,22 +1182,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       } catch {}
     }
 
-    // Fallback: indir veya print
+    // Fallback: indir
     const url = URL.createObjectURL(blob);
-    const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
-    if (isMobile) {
-      // Mobilde indir
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `barkod-${productName.substring(0, 15)}.png`;
-      a.click();
-    } else {
-      // Masaüstünde print window
-      const win = window.open("", "_blank");
-      if (!win) return;
-      win.document.write(`<!DOCTYPE html><html><head><title>Barkod</title><style>* { margin:0; padding:0; } @media print { @page { margin:2mm; } body { -webkit-print-color-adjust:exact; } }</style></head><body><img src="${url}" style="max-width:100%;"/><script>window.onload=function(){setTimeout(function(){window.print();window.close();},500);}<\/script></body></html>`);
-      win.document.close();
-    }
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `barkod-${productName.substring(0, 15)}.png`;
+    a.click();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   };
 
