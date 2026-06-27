@@ -264,6 +264,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [active, setActive] = useState("dashboard");
   const [loadingData, setLoadingData] = useState(true);
   const [message, setMessage] = useState("");
+  const [toastType, setToastType] = useState<"success" | "error" | "info">("info");
   const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
   const [currentUserRole, setCurrentUserRole] = useState<"admin" | "ortak" | "satici">("satici");
   const [currentUserName, setCurrentUserName] = useState<string>("");
@@ -396,7 +397,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     } else if (error) {
       msg = String(error);
     }
-    setMessage("Hata: " + msg);
+    showToast("Hata: " + msg, "error");
+  };
+
+  const showToast = (msg: string, type: "success" | "error" | "info" = "info") => {
+    showToast(msg, "info");
+    setToastType(type);
+    setTimeout(() => showToast(""), 4000, "info");
   };
 
   const loadAll = async () => {
@@ -769,16 +776,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const addProductDefinition = async () => {
     const name = newProduct.name.trim();
-    if (!name || name.length > 50) return setMessage("Ürün adı zorunlu ve en fazla 50 karakter olmalı.");
-    if (!newProduct.typeId) return setMessage("Ürün türü seçimi zorunludur.");
-    if (products.some((p) => p.name.toLowerCase() === name.toLowerCase())) return setMessage("Bu kaynak ürün zaten kayıtlı.");
+    if (!name || name.length > 50) return showToast("Ürün adı zorunlu ve en fazla 50 karakter olmalı.", "error");
+    if (!newProduct.typeId) return showToast("Ürün türü seçimi zorunludur.", "error");
+    if (products.some((p) => p.name.toLowerCase() === name.toLowerCase())) return showToast("Bu kaynak ürün zaten kayıtlı.", "error");
 
     const idTail = Date.now().toString().slice(-6);
     const code = `URN-${idTail}`;
 
     let imageUrl: string | null = null;
     if (newProduct.image) {
-      setMessage("Resim yükleniyor...");
+      showToast("Resim yükleniyor...", "info");
       imageUrl = await uploadImageToStorage(newProduct.image, code);
     }
 
@@ -792,7 +799,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (error) return showError(error);
     await logAction("Ürün eklendi", "products", name, { code });
     setNewProduct({ name: "", image: "", typeId: "" });
-    setMessage("Kaynak ürün kaydedildi.");
+    showToast("Kaynak ürün kaydedildi.", "success");
     loadAll();
   };
 
@@ -821,21 +828,21 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (hasSales) {
       await updateProduct(productId, { passive: true });
       await logAction("Ürün pasife alındı", "products", product.name);
-      return setMessage("Ürün satışlarda kullanıldığı için silinmedi, pasife alındı.");
+      return showToast("Ürün satışlarda kullanıldığı için silinmedi, pasife alındı.", "success");
     }
     const hasBatch = batchItems.some((item) => item.product_id === productId);
-    if (hasBatch) return setMessage("Bu ürüne bağlı parti girişi var. Önce parti satırlarını silin.");
+    if (hasBatch) return showToast("Bu ürüne bağlı parti girişi var. Önce parti satırlarını silin.", "info");
     const { error } = await supabase.from("products").delete().eq("id", productId);
     if (error) return showError(error);
     await logAction("Ürün silindi", "products", product.name);
-    setMessage("Ürün silindi.");
+    showToast("Ürün silindi.", "success");
     loadAll();
   };
 
   const addCustomer = async () => {
     const name = newCustomerName.trim();
-    if (!name || name.length > 50) return setMessage("Cari adı zorunlu ve en fazla 50 karakter olmalı.");
-    if (customers.some((c) => c.name.toLowerCase() === name.toLowerCase())) return setMessage("Bu cari zaten kayıtlı.");
+    if (!name || name.length > 50) return showToast("Cari adı zorunlu ve en fazla 50 karakter olmalı.", "error");
+    if (customers.some((c) => c.name.toLowerCase() === name.toLowerCase())) return showToast("Bu cari zaten kayıtlı.", "error");
     const { error } = await supabase.from("customers").insert({ name });
     if (error) return showError(error);
     await logAction("Cari eklendi", "customers", name);
@@ -861,31 +868,31 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const { error } = await supabase.from("customers").update({ passive: true }).eq("id", customerId);
       if (error) return showError(error);
       await logAction("Cari pasife alındı", "customers", customer.name);
-      setMessage("Cari hareket gördüğü için silinmedi, pasife alındı.");
+      showToast("Cari hareket gördüğü için silinmedi, pasife alındı.", "success");
       return loadAll();
     }
     const { error } = await supabase.from("customers").delete().eq("id", customerId);
     if (error) return showError(error);
     await logAction("Cari silindi", "customers", customer.name);
-    setMessage("Cari silindi.");
+    showToast("Cari silindi.", "success");
     loadAll();
   };
 
   const addBatchName = async () => {
     const name = newBatchName.trim();
-    if (!name) return setMessage("Parti adı boş olamaz.");
-    if (batches.some((b) => b.name === name)) return setMessage("Bu parti zaten kayıtlı.");
+    if (!name) return showToast("Parti adı boş olamaz.", "error");
+    if (batches.some((b) => b.name === name)) return showToast("Bu parti zaten kayıtlı.", "error");
     const { error } = await supabase.from("batches").insert({ name });
     if (error) return showError(error);
     await logAction("Parti eklendi", "batches", name);
     setNewBatchName("");
-    setMessage("Yeni parti adı kaynak listeye eklendi.");
+    showToast("Yeni parti adı kaynak listeye eklendi.", "success");
     loadAll();
   };
 
   const deleteBatchName = async (batchId: string) => {
     const used = batchItems.some((item) => item.batch_id === batchId) || activeSales.some((sale) => sale.batch_id === batchId);
-    if (used) return setMessage("Bu parti kullanıldığı için silinemez.");
+    if (used) return showToast("Bu parti kullanıldığı için silinemez.", "error");
     const batchName = batches.find((b) => b.id === batchId)?.name || batchId;
     const { error } = await supabase.from("batches").delete().eq("id", batchId);
     if (error) return showError(error);
@@ -896,7 +903,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const renameBatchName = async (batchId: string, newName: string) => {
     const clean = newName.trim();
     if (!clean) return;
-    if (batches.some((b) => b.name === clean && b.id !== batchId)) return setMessage("Bu parti adı zaten var.");
+    if (batches.some((b) => b.name === clean && b.id !== batchId)) return showToast("Bu parti adı zaten var.", "error");
     const oldName = batches.find((b) => b.id === batchId)?.name || batchId;
     const { error } = await supabase.from("batches").update({ name: clean }).eq("id", batchId);
     if (error) return showError(error);
@@ -910,9 +917,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const bought = Number(batchForm.bought || 0);
     const buyPrice = Number(batchForm.buyPrice || 0);
     const salePrice = Number(batchForm.salePrice || 0);
-    if (!productId) return setMessage("Parti kaydı için kaynak ürün seçmelisiniz.");
-    if (!batchId) return setMessage("Parti adı zorunlu.");
-    if (bought <= 0 || buyPrice <= 0) return setMessage("Adet ve alış fiyatı 0'dan büyük olmalı.");
+    if (!productId) return showToast("Parti kaydı için kaynak ürün seçmelisiniz.", "error");
+    if (!batchId) return showToast("Parti adı zorunlu.", "error");
+    if (bought <= 0 || buyPrice <= 0) return showToast("Adet ve alış fiyatı 0'dan büyük olmalı.", "error");
 
     const { error } = await supabase.from("batch_items").insert({
       product_id: productId,
@@ -925,7 +932,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (error) return showError(error);
     await logAction("Partiye ürün eklendi", "batch_items", `${productMap.get(productId)?.name || productId} / ${batchMap.get(batchId)?.name || batchId}`, { adet: bought, alis: buyPrice, satis: salePrice, depo: batchForm.depo });
     setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "", depo: "56salon" });
-    setMessage("Parti ürün kaydı eklendi.");
+    showToast("Parti ürün kaydı eklendi.", "success");
     loadAll();
   };
 
@@ -942,7 +949,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         }
       }, 100);
     } catch {
-      setMessage("Kamera açılamadı. İzin verdiğinizden emin olun.");
+      showToast("Kamera açılamadı. İzin verdiğinizden emin olun.", "info");
       setPhotoCaptureTarget(null);
     }
   };
@@ -1077,7 +1084,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const handleBarcodeScanned = (barcodeValue: string) => {
     const product = products.find((p) => p.barcode === barcodeValue);
     if (!product) {
-      setMessage(`Barkod bulunamadı: ${barcodeValue}`);
+      showToast(`Barkod bulunamadı: ${barcodeValue}`, "error");
       return;
     }
     // Stoklu batch_item bul
@@ -1088,7 +1095,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       batchId: item?.batch_id || "",  // batch_id kullan, item.id değil
       depo: item?.depo || prev.depo,
     }));
-    setMessage(`✅ ${product.name} seçildi — adet ve müşteri girin.`);
+    showToast(`✅ ${product.name} seçildi — adet ve müşteri girin.`, "error");
   };
 
   // Benzersiz barkod üret
@@ -1168,7 +1175,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const handleBarcodePrint = async () => {
     if (!barcodeModal) return;
     const qty = Number(barcodeQty);
-    if (!qty || qty <= 0 || qty > 500) return setMessage("Geçerli bir adet girin (1-500).");
+    if (!qty || qty <= 0 || qty > 500) return showToast("Geçerli bir adet girin (1-500).", "error");
 
     const { item, productName, batchName } = barcodeModal;
 
@@ -1216,7 +1223,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const deleteBatchItem = async (item: BatchItem) => {
     const sold = getBatchSoldQtyForItem(item);
-    if (sold > 0) return setMessage("Bu parti satırına bağlı aktif satış var. Önce ilgili satışları iptal edin.");
+    if (sold > 0) return showToast("Bu parti satırına bağlı aktif satış var. Önce ilgili satışları iptal edin.", "info");
     const { error } = await supabase.from("batch_items").delete().eq("id", item.id);
     if (error) return showError(error);
     await logAction("Parti ürün satırı silindi", "batch_items", `${productMap.get(item.product_id)?.name || item.product_id} / ${batchMap.get(item.batch_id)?.name || item.batch_id}`);
@@ -1230,12 +1237,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const customer = customers.find((c) => c.id === saleForm.customerId);
     const product = products.find((p) => p.id === saleForm.productId);
     const qty = Number(saleForm.qty || 0);
-    if (!customer || !product || qty <= 0) return setMessage("Cari, ürün ve adet zorunlu.");
+    if (!customer || !product || qty <= 0) return showToast("Cari, ürün ve adet zorunlu.", "error");
     // Depo bazlı stok kontrolü
     const depoStock = batchItemsForProduct(product.id)
       .filter((i) => i.depo === saleForm.depo)
       .reduce((s, i) => s + Math.max(i.bought - getBatchSoldQtyForItem(i), 0), 0);
-    if (depoStock < qty) return setMessage(`Yetersiz stok. ${saleForm.depo} deposunda bu üründen sadece ${depoStock} adet var.`);
+    if (depoStock < qty) return showToast(`Yetersiz stok. ${saleForm.depo} deposunda bu üründen sadece ${depoStock} adet var.`, "info");
 
     let remainingQty = qty;
     const rows: Record<string, unknown>[] = [];
@@ -1271,7 +1278,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       remainingQty -= take;
     }
 
-    if (remainingQty > 0) return setMessage("Parti stokları yetersiz.");
+    if (remainingQty > 0) return showToast("Parti stokları yetersiz.", "error");
     const { data: insertedSales, error } = await supabase.from("sales").insert(rows).select();
     if (error) return showError(error);
     await logAction("Satış eklendi", "sales", `${customer.name} - ${product.name}`, { adet: qty, toplam: rows.reduce((sum, row) => sum + Number(row.total || 0), 0), satir_sayisi: rows.length });
@@ -1293,7 +1300,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
     try { await allocatePaymentsForCustomer(customer.id); } catch (err) { return showError(err); }
     setSaleForm((prev) => ({ customerId: "", productId: "", batchId: "", qty: "1", seller: prev.seller, saleType: "Normal satış", customSalePrice: "", depo: prev.depo }));
-    setMessage("Satış kaydedildi.");
+    showToast("Satış kaydedildi.", "success");
     loadAll();
     } finally {
       setSaleLoading(false);
@@ -1312,7 +1319,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       }
     }
     await logAction("Satış iptal edildi", "sales", sale ? `${customerMap.get(sale.customer_id)?.name || sale.customer_id} - ${productMap.get(sale.product_id)?.name || sale.product_id}` : saleId, { tutar: sale?.total || 0 });
-    setMessage("Satış iptal edildi. Kayıt silinmez, iptal olarak saklanır.");
+    showToast("Satış iptal edildi. Kayıt silinmez, iptal olarak saklanır.", "success");
     loadAll();
   };
 
@@ -1484,7 +1491,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const updatePayment = async (paymentId: string, newAmount: number, customerId: string) => {
-    if (!newAmount || newAmount <= 0) return setMessage("Tutar 0'dan büyük olmalı.");
+    if (!newAmount || newAmount <= 0) return showToast("Tutar 0'dan büyük olmalı.", "error");
     const { error } = await supabase.from("payments").update({ amount: newAmount }).eq("id", paymentId);
     if (error) return showError(error);
     try { await allocatePaymentsForCustomer(customerId); } catch (err) { return showError(err); }
@@ -1504,9 +1511,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const savePreorder = async () => {
-    if (!preorderForm.customerId) return setMessage("Cari seçin.");
+    if (!preorderForm.customerId) return showToast("Cari seçin.", "info");
     const validItems = preorderForm.items.filter((i) => i.productId && Number(i.qty) > 0);
-    if (!validItems.length) return setMessage("En az bir ürün ekleyin.");
+    if (!validItems.length) return showToast("En az bir ürün ekleyin.", "info");
     const customer = customers.find((c) => c.id === preorderForm.customerId);
     if (editingPreorderId) {
       const { error } = await supabase.from("preorders").update({ customer_id: preorderForm.customerId, note: preorderForm.note }).eq("id", editingPreorderId);
@@ -1555,7 +1562,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (!convertModal) return;
     const { preorder: po, item } = convertModal;
     const price = Number(convertPrices[item.id] || 0);
-    if (!price) return setMessage("Fiyat girin.");
+    if (!price) return showToast("Fiyat girin.", "error");
     const product = productMap.get(item.product_id);
     if (!product) return;
     const userDepo = currentUserEmail.includes("harun") ? "Türkiş-salon" : "56salon";
@@ -1564,7 +1571,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const depo = userDepoStock >= item.qty ? userDepo : otherDepo;
     const seller: Seller = depo === "56salon" ? "Rabia" : "Harun";
     const depoBatchItems = batchItemsForProduct(product.id).filter((bi) => bi.depo === depo && Math.max(bi.bought - getBatchSoldQtyForItem(bi), 0) > 0);
-    if (!depoBatchItems.length) return setMessage(`${product.name} için yeterli stok yok (${depo}).`);
+    if (!depoBatchItems.length) return showToast(`${product.name} için yeterli stok yok (${depo}).`, "error");
     const batchItem = depoBatchItems[0];
     const { error } = await supabase.from("sales").insert({ customer_id: po.customer_id, product_id: product.id, batch_item_id: batchItem.id, qty: item.qty, total: price * item.qty, cost: batchItem.buy_price * item.qty, seller, sale_type: "Normal satış", paid: true, paid_amount: price * item.qty, depo, user_email: currentUserEmail });
     if (error) return showError(error);
@@ -1578,7 +1585,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     await allocatePaymentsForCustomer(po.customer_id);
     await logAction("Ön sipariş satır satışa dönüştürüldü", "preorders", customerMap.get(po.customer_id)?.name || "", { ürün: product.name, adet: item.qty });
     setConvertModal(null);
-    setMessage("");
+    showToast("", "info");
     loadAll();
   };
 
@@ -1638,14 +1645,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const firstError = results.find((r) => r.error)?.error;
     if (firstError) return showError(firstError);
     await logAction("Dönem açıldı", "periods", periodForm.name || `Dönem ${today()}`, { sponsor, rabiaContribution, harunContribution, productCost, shippingCost });
-    setMessage("Yeni dönem açılışı ve katkılar işlendi.");
+    showToast("Yeni dönem açılışı ve katkılar işlendi.", "info");
     loadAll();
   };
 
   const closePeriod = async () => {
     const distributableCash = Number(totals.cash || 0);
     if (distributableCash <= 0) {
-      setMessage("Kasada dağıtılacak para yok.");
+      showToast("Kasada dağıtılacak para yok.", "error");
       return;
     }
 
@@ -1688,7 +1695,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const firstError = results.find((r) => r.error)?.error;
     if (firstError) return showError(firstError);
     await logAction("Dönem kapatıldı", "periods", openPeriod?.name || `Kapanış ${today()}`, { dagitilan_kasa: distributableCash, rabia_payi: half, harun_payi: half });
-    setMessage(`Dönem kapatıldı; ${money(distributableCash)} kasa Rabia ve Harun arasında %50/%50 dağıtıldı.`);
+    showToast(`Dönem kapatıldı; ${money(distributableCash)} kasa Rabia ve Harun arasında %50/%50 dağıtıldı.`, "info");
     loadAll();
   };
 
@@ -1724,7 +1731,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     let imageUrl: string | null = pendingImageRef.current[productId] || (draft.image_url as string | undefined) || product?.image_url || null;
 
     if (imageUrl && imageUrl.startsWith("data:")) {
-      setMessage("Resim yükleniyor...");
+      showToast("Resim yükleniyor...", "info");
       imageUrl = await uploadImageToStorage(imageUrl, product?.code || productId);
       delete pendingImageRef.current[productId];
     }
@@ -1764,7 +1771,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const draft = customerDrafts[customerId] || {};
     const name = String(draft.name || "").trim();
     if (!name || name.length > 50) {
-      setMessage("Cari adı zorunlu ve en fazla 50 karakter olmalı.");
+      showToast("Cari adı zorunlu ve en fazla 50 karakter olmalı.", "error");
       return;
     }
     const oldName = customers.find((c) => c.id === customerId)?.name || customerId;
@@ -2005,7 +2012,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         {message ? (
           <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border bg-white p-3 text-sm shadow-sm">
             <span>{message}</span>
-            <button type="button" className="btn-secondary" onClick={() => setMessage("")}>Kapat</button>
+            <button type="button" className="btn-secondary" onClick={() => showToast("")}>Kapat</button>
           </div>
         ) : null}
 
@@ -2398,14 +2405,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                   Satış Detayı
                                 </button>
                                 <button type="button" className="product-btn product-btn--secondary" onClick={async () => {
-                                  if (!p.barcode) return setMessage("Bu ürüne ait barkod yok.");
+                                  if (!p.barcode) return showToast("Bu ürüne ait barkod yok.", "error");
                                   await showQrPreview(p.name, p.barcode);
                                 }}>
                                   🔳 QR Göster
                                 </button>
                                 <button type="button" className="product-btn product-btn--secondary" onClick={() => {
                                   const items = batchItems.filter((i) => i.product_id === p.id);
-                                  if (!items.length) return setMessage("Bu ürüne ait parti kaydı yok.");
+                                  if (!items.length) return showToast("Bu ürüne ait parti kaydı yok.", "error");
                                   if (items.length === 1) {
                                     const item = items[0];
                                     setBarcodeModal({ item, productName: p.name, batchName: batchMap.get(item.batch_id)?.name || "-" });
@@ -2623,6 +2630,27 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 );
               })()}
             </Card>
+          </div>
+        )}
+
+        {/* Toast Popup */}
+        {message && (
+          <div
+            className="fixed left-1/2 z-[99999] -translate-x-1/2"
+            style={{ bottom: 32, maxWidth: "90vw", minWidth: 280 }}
+            onClick={() => setMessage("")}
+          >
+            <div className={`flex items-center gap-3 rounded-2xl px-5 py-4 shadow-2xl text-sm font-medium cursor-pointer ${
+              toastType === "error" ? "bg-red-600 text-white" :
+              toastType === "success" ? "bg-green-600 text-white" :
+              "bg-slate-800 text-white"
+            }`}>
+              <span>
+                {toastType === "error" ? "❌" : toastType === "success" ? "✅" : "ℹ️"}
+              </span>
+              <span className="flex-1">{message}</span>
+              <span className="opacity-60 text-xs">×</span>
+            </div>
           </div>
         )}
 
@@ -2997,7 +3025,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <button type="button" className="btn" onClick={savePreorder}>{editingPreorderId ? "Güncelle" : "Kaydet"}</button>
                   {editingPreorderId && <button type="button" className="btn-secondary" onClick={() => { setEditingPreorderId(null); setPreorderForm({ customerId: "", note: "", items: [{ productId: "", qty: "1" }] }); }}>Vazgeç</button>}
                 </div>
-                {message && <p className="text-sm text-red-600">{message}</p>}
+                
               </div>
             </Card>
 
@@ -3178,10 +3206,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     </select>
                   </div>
                 </div>
-                {message && <p className="text-sm text-red-600 mt-2">{message}</p>}
+                
                 <div className="flex gap-2 mt-4">
                   <button type="button" className="btn" onClick={convertToSales}>Satışa Dönüştür</button>
-                  <button type="button" className="btn-secondary" onClick={() => { setConvertModal(null); setMessage(""); }}>Vazgeç</button>
+                  <button type="button" className="btn-secondary" onClick={() => { setConvertModal(null); showToast("", "info"); }}>Vazgeç</button>
                 </div>
               </div>
             </div>
@@ -3337,7 +3365,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                           if (!error && inserted && inserted[0]) setBatchCosts((prev) => [...prev, inserted[0] as BatchCost]);
                         }
                         if (saveError) { showError(saveError); return; }
-                        setMessage(`${batch.name} maliyeti kaydedildi.`);
+                        showToast(`${batch.name} maliyeti kaydedildi.`, "success");
                       };
                       return (
                         <tr key={batch.id} className="hover:bg-slate-50">
