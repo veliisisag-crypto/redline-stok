@@ -1102,91 +1102,66 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   // QR kodlu PDF oluştur ve yazdır (30x30mm, Phomemo M110)
   const printBarcodePDF = async (barcodeValue: string, productName: string, qty: number) => {
     const QRCode = (await import("qrcode")).default;
+    const { jsPDF } = await import("jspdf");
 
-    // 300 DPI için: 30mm = ~354px
-    const labelSize = 354;
-    const qrSize = 260;
-
-    // Her etiket için ayrı canvas — tek sütun, dikey dizili
-    const cols = 1;
-    const rows = qty;
-    const gap = 8;
-    const padding = 10;
-    const totalW = labelSize + padding * 2;
-    const totalH = rows * labelSize + (rows - 1) * gap + padding * 2;
-
-    const sheetCanvas = document.createElement("canvas");
-    sheetCanvas.width = totalW;
-    sheetCanvas.height = totalH;
-    const ctx = sheetCanvas.getContext("2d")!;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, totalW, totalH);
+    // 30x30mm etiket boyutu
+    const labelMm = 30;
+    // Her sayfada 1 etiket — Phomemo M110 için ideal
+    const doc = new jsPDF({ unit: "mm", format: [labelMm, labelMm * qty + 2 * (qty - 1)], orientation: "portrait" });
 
     // QR kod üret — yüksek çözünürlük
     const qrCanvas = document.createElement("canvas");
     await QRCode.toCanvas(qrCanvas, barcodeValue, {
-      width: qrSize,
+      width: 400,
       margin: 1,
       errorCorrectionLevel: "H",
       color: { dark: "#000000", light: "#ffffff" },
     });
-    const qrImg = new Image();
-    qrImg.src = qrCanvas.toDataURL("image/png");
-    await new Promise((res) => { qrImg.onload = res; });
+    const qrDataUrl = qrCanvas.toDataURL("image/png");
 
     for (let i = 0; i < qty; i++) {
-      const x = padding;
-      const y = padding + i * (labelSize + gap);
-      const cx = x + labelSize / 2;
-      const cy = y + labelSize / 2;
+      if (i > 0) doc.addPage([labelMm, labelMm]);
+      const yOffset = 0;
 
-      // Yuvarlak zemin
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(cx, cy, labelSize / 2, 0, Math.PI * 2);
-      ctx.fillStyle = "#ffffff";
-      ctx.fill();
-      ctx.strokeStyle = "#dddddd";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.clip();
+      // Beyaz zemin
+      doc.setFillColor(255, 255, 255);
+      doc.rect(0, yOffset, labelMm, labelMm, "F");
 
-      // QR kodu ortala — üstte
-      const qrX = cx - qrSize / 2;
-      const qrY = y + 20;
-      ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+      // QR kod — ortala
+      const qrMm = 22;
+      const qrX = (labelMm - qrMm) / 2;
+      doc.addImage(qrDataUrl, "PNG", qrX, yOffset + 1, qrMm, qrMm);
 
       // Ürün adı
-      ctx.font = "bold 22px Arial";
-      ctx.fillStyle = "#000000";
-      ctx.textAlign = "center";
-      const shortName = productName.length > 20 ? productName.substring(0, 20) + "…" : productName;
-      ctx.fillText(shortName, cx, qrY + qrSize + 30);
+      doc.setFontSize(4.5);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(0, 0, 0);
+      const shortName = productName.length > 22 ? productName.substring(0, 22) + "…" : productName;
+      doc.text(shortName, labelMm / 2, yOffset + 25, { align: "center" });
 
       // Barkod kodu
-      ctx.font = "16px monospace";
-      ctx.fillStyle = "#888888";
-      ctx.fillText(barcodeValue.substring(0, 18), cx, qrY + qrSize + 54);
-
-      ctx.restore();
+      doc.setFontSize(3.5);
+      doc.setFont("courier", "normal");
+      doc.setTextColor(120, 120, 120);
+      doc.text(barcodeValue.substring(0, 20), labelMm / 2, yOffset + 28.5, { align: "center" });
     }
 
-    const blob = await new Promise<Blob>((res) => sheetCanvas.toBlob((b) => res(b!), "image/png", 1.0));
+    const pdfBlob = doc.output("blob");
+    const pdfFile = new File([pdfBlob], `barkod-${productName.substring(0, 15)}.pdf`, { type: "application/pdf" });
 
-    // Web Share API — mobilde paylaş
-    if (navigator.share && navigator.canShare?.({ files: [new File([blob], "barkod.png", { type: "image/png" })] })) {
-      const file = new File([blob], `barkod-${productName.substring(0, 15)}.png`, { type: "image/png" });
+    // Web Share API ile paylaş (mobil)
+    if (navigator.share && navigator.canShare?.({ files: [pdfFile] })) {
       try {
-        await navigator.share({ files: [file], title: `${productName} Barkod`, text: `${qty} adet barkod etiketi` });
+        await navigator.share({ files: [pdfFile], title: `${productName} Barkod` });
         return;
       } catch {}
     }
 
     // Fallback: indir
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(pdfBlob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `barkod-${productName.substring(0, 15)}.png`;
+    a.download = pdfFile.name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   };
