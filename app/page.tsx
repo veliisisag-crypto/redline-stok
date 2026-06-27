@@ -306,6 +306,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [showKarDetay, setShowKarDetay] = useState(false);
   const [showTahsilatDetay, setShowTahsilatDetay] = useState(false);
   const [saleLoading, setSaleLoading] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const [editingNetOdemeId, setEditingNetOdemeId] = useState<string | null>(null);
   const [editingNetOdemeVal, setEditingNetOdemeVal] = useState<string>("");
   const [salesSort, setSalesSort] = useState<{col: string; dir: "asc"|"desc"}>({col: "created_at", dir: "desc"});
@@ -483,6 +484,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   useEffect(() => {
+    setProcessing(false);
     loadAll();
   }, []);
 
@@ -775,6 +777,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const addProductDefinition = async () => {
+    if (processing) return;
+    setProcessing(true);
     const name = newProduct.name.trim();
     if (!name || name.length > 50) return showToast("Ürün adı zorunlu ve en fazla 50 karakter olmalı.", "error");
     if (!newProduct.typeId) return showToast("Ürün türü seçimi zorunludur.", "error");
@@ -800,6 +804,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     await logAction("Ürün eklendi", "products", name, { code });
     setNewProduct({ name: "", image: "", typeId: "" });
     showToast("Kaynak ürün kaydedildi.", "success");
+    setProcessing(false);
     loadAll();
   };
 
@@ -815,6 +820,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     // Exclude image_url from log to avoid storing large base64/URL data
     const { image_url: _img, ...logPatch } = dbPatch as Record<string, unknown> & { image_url?: unknown };
     await logAction("Ürün değiştirildi", "products", products.find((p) => p.id === productId)?.name || productId, logPatch);
+    setProcessing(false);
     loadAll();
   };
 
@@ -836,10 +842,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (error) return showError(error);
     await logAction("Ürün silindi", "products", product.name);
     showToast("Ürün silindi.", "success");
+    setProcessing(false);
     loadAll();
   };
 
   const addCustomer = async () => {
+    if (processing) return;
+    setProcessing(true);
     const name = newCustomerName.trim();
     if (!name || name.length > 50) return showToast("Cari adı zorunlu ve en fazla 50 karakter olmalı.", "error");
     if (customers.some((c) => c.name.toLowerCase() === name.toLowerCase())) return showToast("Bu cari zaten kayıtlı.", "error");
@@ -847,6 +856,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (error) return showError(error);
     await logAction("Cari eklendi", "customers", name);
     setNewCustomerName("");
+    setProcessing(false);
     loadAll();
   };
 
@@ -856,6 +866,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const { error } = await supabase.from("customers").update({ name }).eq("id", customerId);
     if (error) return showError(error);
     await logAction("Cari değiştirildi", "customers", oldName, { yeni_ad: name });
+    setProcessing(false);
     loadAll();
   };
 
@@ -875,10 +886,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (error) return showError(error);
     await logAction("Cari silindi", "customers", customer.name);
     showToast("Cari silindi.", "success");
+    setProcessing(false);
     loadAll();
   };
 
   const addBatchName = async () => {
+    if (processing) return;
+    setProcessing(true);
     const name = newBatchName.trim();
     if (!name) return showToast("Parti adı boş olamaz.", "error");
     if (batches.some((b) => b.name === name)) return showToast("Bu parti zaten kayıtlı.", "error");
@@ -887,6 +901,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     await logAction("Parti eklendi", "batches", name);
     setNewBatchName("");
     showToast("Yeni parti adı kaynak listeye eklendi.", "success");
+    setProcessing(false);
     loadAll();
   };
 
@@ -897,6 +912,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const { error } = await supabase.from("batches").delete().eq("id", batchId);
     if (error) return showError(error);
     await logAction("Parti silindi", "batches", batchName);
+    setProcessing(false);
     loadAll();
   };
 
@@ -908,10 +924,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const { error } = await supabase.from("batches").update({ name: clean }).eq("id", batchId);
     if (error) return showError(error);
     await logAction("Parti değiştirildi", "batches", oldName, { yeni_ad: clean });
+    setProcessing(false);
     loadAll();
   };
 
   const addBatchProduct = async () => {
+    if (processing) return;
+    setProcessing(true);
     const productId = batchForm.productId;
     const batchId = batchForm.batchId;
     const bought = Number(batchForm.bought || 0);
@@ -933,6 +952,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     await logAction("Partiye ürün eklendi", "batch_items", `${productMap.get(productId)?.name || productId} / ${batchMap.get(batchId)?.name || batchId}`, { adet: bought, alis: buyPrice, satis: salePrice, depo: batchForm.depo });
     setBatchForm({ batchId, productId: "", bought: "", buyPrice: "", salePrice: "", depo: "56salon" });
     showToast("Parti ürün kaydı eklendi.", "success");
+    setProcessing(false);
     loadAll();
   };
 
@@ -1196,6 +1216,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   // Barkod bas butonu handler
   const handleBarcodePrint = async () => {
+    if (processing) return;
+    setProcessing(true);
     if (!barcodeModal) return;
     const qty = Number(barcodeQty);
     if (!qty || qty <= 0 || qty > 500) return showToast("Geçerli bir adet girin (1-500).", "error");
@@ -1228,6 +1250,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     setBarcodeModal(null);
     setBarcodeQty("");
     setBarcodeMode("yeni");
+    setProcessing(false);
     loadAll();
   };
 
@@ -1241,6 +1264,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const { error } = await supabase.from("batch_items").update(dbPatch).eq("id", itemId);
     if (error) return showError(error);
     await logAction("Parti ürün satırı değiştirildi", "batch_items", itemId, dbPatch);
+    setProcessing(false);
     loadAll();
   };
 
@@ -1250,6 +1274,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const { error } = await supabase.from("batch_items").delete().eq("id", item.id);
     if (error) return showError(error);
     await logAction("Parti ürün satırı silindi", "batch_items", `${productMap.get(item.product_id)?.name || item.product_id} / ${batchMap.get(item.batch_id)?.name || item.batch_id}`);
+    setProcessing(false);
     loadAll();
   };
 
@@ -1261,6 +1286,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const product = products.find((p) => p.id === saleForm.productId);
     const qty = Number(saleForm.qty || 0);
     if (!customer || !product || qty <= 0) return showToast("Cari, ürün ve adet zorunlu.", "error");
+    
+    // Normal satışta fiyat 0 olamaz
+    const isZeroType = saleForm.saleType === "İç Kullanım" || saleForm.saleType === "Fire/Bozuk";
+    if (!isZeroType && (!saleForm.customSalePrice || Number(saleForm.customSalePrice) <= 0)) {
+      return showToast("Normal satışta fiyat 0 olamaz.", "error");
+    }
     // Depo bazlı stok kontrolü
     const depoStock = batchItemsForProduct(product.id)
       .filter((i) => i.depo === saleForm.depo)
@@ -1324,6 +1355,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     try { await allocatePaymentsForCustomer(customer.id); } catch (err) { return showError(err); }
     setSaleForm((prev) => ({ customerId: "", productId: "", batchId: "", qty: "1", seller: prev.seller, saleType: "Normal satış", customSalePrice: "", depo: prev.depo }));
     showToast("Satış kaydedildi.", "success");
+    setProcessing(false);
     loadAll();
     } finally {
       setSaleLoading(false);
@@ -1343,6 +1375,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
     await logAction("Satış iptal edildi", "sales", sale ? `${customerMap.get(sale.customer_id)?.name || sale.customer_id} - ${productMap.get(sale.product_id)?.name || sale.product_id}` : saleId, { tutar: sale?.total || 0 });
     showToast("Satış iptal edildi. Kayıt silinmez, iptal olarak saklanır.", "success");
+    setProcessing(false);
     loadAll();
   };
 
@@ -1371,6 +1404,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       }
     }
     await logAction("Satış değiştirildi", "sales", saleId, dbPatch);
+    setProcessing(false);
     loadAll();
   };
 
@@ -1497,6 +1531,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const addCustomerPayment = async (customerId: string) => {
+    if (processing) return;
+    setProcessing(true);
     const amount = Number(paymentInputs[customerId] || 0);
     if (!amount || amount <= 0) return;
     const { data: userData } = await supabase.auth.getUser();
@@ -1510,6 +1546,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
     await logAction("Ödeme eklendi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: amount });
     setPaymentInputs({ ...paymentInputs, [customerId]: "" });
+    setProcessing(false);
     loadAll();
   };
 
@@ -1521,6 +1558,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     await logAction("Ödeme güncellendi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: newAmount });
     setEditingPaymentId(null);
     setEditingPaymentAmount("");
+    setProcessing(false);
     loadAll();
   };
 
@@ -1530,6 +1568,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (error) return showError(error);
     try { await allocatePaymentsForCustomer(customerId); } catch (err) { return showError(err); }
     await logAction("Ödeme silindi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: amount });
+    setProcessing(false);
     loadAll();
   };
 
@@ -1554,6 +1593,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       await logAction("Ön sipariş oluşturuldu", "preorders", customer?.name || "", { items: validItems.length, oluşturan: currentUserEmail });
     }
     setPreorderForm({ customerId: "", note: "", items: [{ productId: "", qty: "1" }] });
+    setProcessing(false);
     loadAll();
   };
 
@@ -1564,6 +1604,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const { error } = await supabase.from("preorders").delete().eq("id", id);
     if (error) return showError(error);
     await logAction("Ön sipariş silindi", "preorders", customerMap.get(po?.customer_id || "")?.name || "");
+    setProcessing(false);
     loadAll();
   };
 
@@ -1609,6 +1650,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     await logAction("Ön sipariş satır satışa dönüştürüldü", "preorders", customerMap.get(po.customer_id)?.name || "", { ürün: product.name, adet: item.qty });
     setConvertModal(null);
     showToast("", "info");
+    setProcessing(false);
     loadAll();
   };
 
@@ -1626,6 +1668,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     }
     await logAction("Tamamı ödendi", "payments", customerMap.get(customerId)?.name || customerId, { tutar: balance });
     setPaymentInputs({ ...paymentInputs, [customerId]: "" });
+    setProcessing(false);
     loadAll();
   };
 
@@ -1634,6 +1677,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     const { error } = await supabase.from("partner_ledger").update({ [field]: value }).eq("id", id);
     if (error) return showError(error);
     await logAction("Ortaklık kaydı değiştirildi", "partner_ledger", partner?.partner_name || id, { alan: field, deger: value });
+    setProcessing(false);
     loadAll();
   };
 
@@ -1669,6 +1713,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (firstError) return showError(firstError);
     await logAction("Dönem açıldı", "periods", periodForm.name || `Dönem ${today()}`, { sponsor, rabiaContribution, harunContribution, productCost, shippingCost });
     showToast("Yeni dönem açılışı ve katkılar işlendi.", "info");
+    setProcessing(false);
     loadAll();
   };
 
@@ -1719,6 +1764,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (firstError) return showError(firstError);
     await logAction("Dönem kapatıldı", "periods", openPeriod?.name || `Kapanış ${today()}`, { dagitilan_kasa: distributableCash, rabia_payi: half, harun_payi: half });
     showToast(`Dönem kapatıldı; ${money(distributableCash)} kasa Rabia ve Harun arasında %50/%50 dağıtıldı.`, "info");
+    setProcessing(false);
     loadAll();
   };
 
@@ -1747,6 +1793,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const saveProductEdit = async (productId: string) => {
+    if (processing) return;
+    setProcessing(true);
     const draft = productDrafts[productId] || {};
     const product = products.find((p) => p.id === productId);
 
@@ -1791,6 +1839,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const saveCustomerEdit = async (customerId: string) => {
+    if (processing) return;
+    setProcessing(true);
     const draft = customerDrafts[customerId] || {};
     const name = String(draft.name || "").trim();
     if (!name || name.length > 50) {
@@ -1805,6 +1855,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (error) return showError(error);
     await logAction("Cari değiştirildi", "customers", oldName, { yeni_ad: name, passive: Boolean(draft.passive) });
     cancelCustomerEdit(customerId);
+    setProcessing(false);
     loadAll();
   };
 
@@ -1907,7 +1958,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               sale_price: item.sale_price,
               depo: newDepo,
             });
-            loadAll();
+            setProcessing(false);
+    loadAll();
           }
           setSplitModal(null);
           setSplitQty("");
@@ -2242,7 +2294,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                         <label className="input cursor-pointer text-center text-sm">📁 Dosya Seç<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = async () => { const resized = await resizeImage(String(reader.result || "")); setNewProduct((prev) => ({ ...prev, image: resized })); }; reader.readAsDataURL(file); }} /></label>
                         <button type="button" className="input cursor-pointer text-center text-sm" onClick={() => openPhotoCapture("newProduct")}>📷 Kameradan Çek</button>
                       </div>
-                      <button type="button" className="btn" onClick={addProductDefinition}>Kaynak Ürün Ekle</button>
+                      <button type="button" className="btn" disabled={processing} onClick={addProductDefinition}>{processing ? "..." : "Kaynak Ürün Ekle"}</button>
                     </div>
                     {newProduct.image ? <img src={newProduct.image} alt="Önizleme" className="mt-4 h-24 w-24 rounded-xl border object-cover" /> : null}
                   </div>
@@ -2523,7 +2575,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
               <p className="mb-5 text-slate-500">Önce kaynak ürün ve parti adı oluşturulur. Sonra partiye ürün, adet, alış fiyatı ve hedef satış fiyatı girilir.</p>
               <div className="mb-5 flex flex-wrap gap-3">
                 <input className="input max-w-sm" placeholder="Yeni parti adı" value={newBatchName} onChange={(e) => setNewBatchName(e.target.value)} />
-                <button type="button" className="btn-secondary" onClick={addBatchName}>Parti Adı Ekle</button>
+                <button type="button" className="btn-secondary" disabled={processing} onClick={addBatchName}>{processing ? "..." : "Parti Adı Ekle"}</button>
               </div>
               <div className="mb-5 flex flex-wrap gap-2">
                 {sortedBatches.map((batch) => (
@@ -2812,7 +2864,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
               <div className="flex gap-3">
                 <button type="button" className="btn-secondary flex-1" onClick={() => { setBarcodeModal(null); setBarcodeQty(""); }}>İptal</button>
-                <button type="button" className="btn-primary flex-1" onClick={handleBarcodePrint}>Yazdır</button>
+                <button type="button" className="btn-primary flex-1" disabled={processing} onClick={handleBarcodePrint}>{processing ? "..." : "Yazdır"}</button>
               </div>
             </div>
           </div>
@@ -2835,7 +2887,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                   <div className="product-add-form-panel">
                     <div className="flex flex-wrap gap-3">
                       <input className="input max-w-md" maxLength={50} placeholder="Cari adı (max 50 karakter)" value={newCustomerName} onChange={(e) => setNewCustomerName(e.target.value)} />
-                      <button type="button" className="btn" onClick={addCustomer}>Cari Ekle</button>
+                      <button type="button" className="btn" disabled={processing} onClick={addCustomer}>{processing ? "..." : "Cari Ekle"}</button>
                     </div>
                   </div>
                 </details>
@@ -3301,7 +3353,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                 }}>
                   <option>Normal satış</option><option>Fire/Bozuk</option><option>İç Kullanım</option>
                 </select>
-                <input className="input" type="number" min="0" placeholder="Satış fiyatı" value={saleForm.customSalePrice} onChange={(e) => setSaleForm({ ...saleForm, customSalePrice: e.target.value })} />
+                {saleForm.saleType === "Normal satış" && (
+                  <input className="input" type="number" min="0" placeholder="Satış fiyatı" value={saleForm.customSalePrice} onChange={(e) => setSaleForm({ ...saleForm, customSalePrice: e.target.value })} />
+                )}
                 <button type="button" className="btn" onClick={addSaleFromForm} disabled={saleLoading}>{saleLoading ? "Kaydediliyor..." : "Satışı Kaydet"}</button>
               </div>
             </Card>
@@ -3487,7 +3541,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                     <button type="button" className="btn" style={{fontSize:"0.7rem", padding:"3px 10px"}} onClick={async () => {
                                       await supabase.from("periods").update({ [field]: Number(editingNetOdemeVal) || 0 }).eq("id", p.id);
                                       setEditingNetOdemeId(null);
-                                      loadAll();
+                                      setProcessing(false);
+    loadAll();
                                     }}>Kaydet</button>
                                     <button type="button" className="btn-secondary" style={{fontSize:"0.7rem", padding:"3px 8px"}} onClick={() => setEditingNetOdemeId(null)}>✕</button>
                                   </div>
@@ -3508,7 +3563,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                                     <button type="button" className="btn" style={{fontSize:"0.7rem", padding:"3px 10px"}} onClick={async () => {
                                       await supabase.from("periods").update({ [field]: Number(editingNetOdemeVal) || 0 }).eq("id", p.id);
                                       setEditingNetOdemeId(null);
-                                      loadAll();
+                                      setProcessing(false);
+    loadAll();
                                     }}>Kaydet</button>
                                     <button type="button" className="btn-secondary" style={{fontSize:"0.7rem", padding:"3px 8px"}} onClick={() => setEditingNetOdemeId(null)}>✕</button>
                                   </div>
