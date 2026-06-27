@@ -1125,15 +1125,15 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       // QR kod üret
       const qrCanvas = document.createElement("canvas");
       await QRCode.toCanvas(qrCanvas, barcodeValue, {
-        width: 220, margin: 1,
+        width: 190, margin: 2,
         errorCorrectionLevel: "H",
         color: { dark: "#000000", light: "#ffffff" },
       });
 
       // QR'ı ortala — üstte
-      const qrSize = 210;
+      const qrSize = 185;
       const qrX = (labelPx - qrSize) / 2;
-      const qrY = 10;
+      const qrY = 18;
       ctx.drawImage(qrCanvas, qrX, qrY, qrSize, qrSize);
 
       // Ürün adı — Türkçe karakterler canvas'ta sorunsuz
