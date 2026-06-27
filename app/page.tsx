@@ -1075,18 +1075,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   // Taranan barkodu işle
   const handleBarcodeScanned = (barcodeValue: string) => {
-    // products tablosunda barkodu ara
     const product = products.find((p) => p.barcode === barcodeValue);
     if (!product) {
       setMessage(`Barkod bulunamadı: ${barcodeValue}`);
       return;
     }
-    // O ürünün stoklu batch_item'ını bul
+    // Stoklu batch_item bul
     const item = batchItems.find((i) => i.product_id === product.id && (i.bought - getBatchSoldQtyForItem(i)) > 0);
     setSaleForm((prev) => ({
       ...prev,
       productId: product.id,
-      batchId: item?.id || "",
+      batchId: item?.batch_id || "",  // batch_id kullan, item.id değil
       depo: item?.depo || prev.depo,
     }));
     setMessage(`✅ ${product.name} seçildi — adet ve müşteri girin.`);
