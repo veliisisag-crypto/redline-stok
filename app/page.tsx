@@ -322,10 +322,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [customerDrafts, setCustomerDrafts] = useState<Record<string, Partial<Customer>>>({});
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
 
-  const [newProduct, setNewProduct] = useState({ name: "", image: "", typeId: "" });
+  const [newProduct, setNewProduct] = useState({ name: "", image: "", typeId: "", barcode: "" });
   const [productTypes, setProductTypes] = useState<ProductType[]>([]);
   const [newProductTypeName, setNewProductTypeName] = useState("");
   const [productTypeMessage, setProductTypeMessage] = useState("");
+  const [editingTypeId, setEditingTypeId] = useState<string | null>(null);
+  const [editingTypeName, setEditingTypeName] = useState("");
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newBatchName, setNewBatchName] = useState("");
   const [batchReportFilter, setBatchReportFilter] = useState("Tümü");
@@ -798,11 +800,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       code,
       image_url: imageUrl,
       type_id: newProduct.typeId,
-      barcode: generateBarcode(),
+      barcode: newProduct.barcode.trim() || generateBarcode(),
     });
     if (error) return showError(error);
     await logAction("Ürün eklendi", "products", name, { code });
-    setNewProduct({ name: "", image: "", typeId: "" });
+    setNewProduct({ name: "", image: "", typeId: "", barcode: "" });
     showToast("Kaynak ürün kaydedildi.", "success");
     setProcessing(false);
     loadAll();
@@ -2269,6 +2271,80 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
         {active === "products" && (
           <div className="space-y-0">
+            {/* Ürün Türleri */}
+            <div className="product-page">
+              <div className="product-page-header">
+                <h2 className="product-page-title">Ürün Türleri</h2>
+              </div>
+              <div style={{padding:"0 16px 16px"}}>
+                {productTypeMessage && <div className="mb-3 rounded-lg bg-green-50 p-2 text-sm text-green-700">{productTypeMessage}</div>}
+                <div className="flex gap-2 mb-3">
+                  <input className="input flex-1" placeholder="Yeni tür adı (örn: Şampuan, Boya...)" value={newProductTypeName} onChange={(e) => setNewProductTypeName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") document.getElementById("addTypeBtn")?.click(); }} />
+                  <button id="addTypeBtn" type="button" className="btn" disabled={processing} onClick={async () => {
+                    const name = newProductTypeName.trim();
+                    if (!name) return;
+                    if (productTypes.some((t) => t.name.toLowerCase() === name.toLowerCase())) {
+                      setProductTypeMessage("Bu tür zaten mevcut.");
+                      setTimeout(() => setProductTypeMessage(""), 3000);
+                      return;
+                    }
+                    setProcessing(true);
+                    const { data, error } = await supabase.from("product_types").insert({ name, active: true }).select().single();
+                    setProcessing(false);
+                    if (error) { showToast("Hata: " + error.message, "error"); return; }
+                    setProductTypes((prev) => [...prev, data as ProductType]);
+                    setNewProductTypeName("");
+                    setProductTypeMessage(`"${name}" eklendi.`);
+                    setTimeout(() => setProductTypeMessage(""), 3000);
+                  }}>{processing ? "..." : "Ekle"}</button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {productTypes.map((t) => (
+                    <div key={t.id} className={`flex items-center gap-1 rounded-full px-3 py-1 text-sm border ${t.active ? "bg-slate-100 border-slate-300" : "bg-red-50 border-red-200 text-red-400"}`}>
+                      {editingTypeId === t.id ? (
+                        <>
+                          <input className="border-b border-slate-400 bg-transparent text-sm outline-none w-28" value={editingTypeName}
+                            onChange={(e) => setEditingTypeName(e.target.value)}
+                            onKeyDown={async (e) => {
+                              if (e.key === "Enter") {
+                                const name = editingTypeName.trim();
+                                if (!name) return;
+                                await supabase.from("product_types").update({ name }).eq("id", t.id);
+                                setProductTypes((prev) => prev.map((x) => x.id === t.id ? { ...x, name } : x));
+                                setEditingTypeId(null);
+                              } else if (e.key === "Escape") {
+                                setEditingTypeId(null);
+                              }
+                            }} autoFocus />
+                          <button type="button" className="text-green-600 font-bold" onClick={async () => {
+                            const name = editingTypeName.trim();
+                            if (!name) return;
+                            await supabase.from("product_types").update({ name }).eq("id", t.id);
+                            setProductTypes((prev) => prev.map((x) => x.id === t.id ? { ...x, name } : x));
+                            setEditingTypeId(null);
+                          }}>✓</button>
+                          <button type="button" className="text-slate-400" onClick={() => setEditingTypeId(null)}>✕</button>
+                        </>
+                      ) : (
+                        <>
+                          <span>{t.name}</span>
+                          <button type="button" className="text-slate-400 hover:text-slate-600 ml-1" title="Düzenle" onClick={() => { setEditingTypeId(t.id); setEditingTypeName(t.name); }}>✎</button>
+                          <button type="button" className={`ml-1 text-xs ${t.active ? "text-slate-400 hover:text-red-500" : "text-red-400 hover:text-green-600"}`}
+                            title={t.active ? "Pasife al" : "Aktife al"}
+                            onClick={async () => {
+                              await supabase.from("product_types").update({ active: !t.active }).eq("id", t.id);
+                              setProductTypes((prev) => prev.map((x) => x.id === t.id ? { ...x, active: !t.active } : x));
+                            }}>{t.active ? "●" : "○"}</button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-slate-400">● aktif &nbsp; ○ pasif &nbsp; ✎ düzenle &nbsp; Silme desteği yok — pasife alabilirsiniz.</p>
+              </div>
+            </div>
+
             {/* Mobile-first product page */}
             <div className="product-page">
               <div className="product-page-header">
@@ -2286,12 +2362,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
                     Yeni Ürün Ekle
                   </summary>
                   <div className="product-add-form-panel">
-                    <div className="grid gap-3 md:grid-cols-4">
+                    <div className="grid gap-3 md:grid-cols-5">
                       <input className="input" maxLength={50} placeholder="Ürün adı (max 50)" value={newProduct.name} onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })} />
                       <select className="input" value={newProduct.typeId} onChange={(e) => setNewProduct({ ...newProduct, typeId: e.target.value })}>
                         <option value="">-- Ürün Türü Seç * --</option>
                         {productTypes.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
+                      <input className="input" placeholder="Barkod (opsiyonel)" value={newProduct.barcode} onChange={(e) => setNewProduct({ ...newProduct, barcode: e.target.value })} />
                       <div className="flex flex-col gap-2">
                         <label className="input cursor-pointer text-center text-sm">📁 Dosya Seç<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = async () => { const resized = await resizeImage(String(reader.result || "")); setNewProduct((prev) => ({ ...prev, image: resized })); }; reader.readAsDataURL(file); }} /></label>
                         <button type="button" className="input cursor-pointer text-center text-sm" onClick={() => openPhotoCapture("newProduct")}>📷 Kameradan Çek</button>
