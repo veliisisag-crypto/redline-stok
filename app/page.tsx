@@ -1010,6 +1010,50 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   // Barkod kontrol tarayıcısını başlat
+  // Kamera frame'ini yakala ve Claude API ile barkod analizi yap
+  const captureFrameAndAnalyze = async (videoEl: HTMLVideoElement): Promise<string | null> => {
+    try {
+      const canvas = document.createElement("canvas");
+      // Yüksek çözünürlük için video boyutunu kullan
+      canvas.width = videoEl.videoWidth || 1280;
+      canvas.height = videoEl.videoHeight || 720;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+      const base64 = canvas.toDataURL("image/jpeg", 0.92).split(",")[1];
+
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 100,
+          messages: [{
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: { type: "base64", media_type: "image/jpeg", data: base64 }
+              },
+              {
+                type: "text",
+                text: "Bu görselde bir barkod veya QR kod var mı? Varsa sadece barkod numarasını yaz, başka hiçbir şey yazma. Yoksa sadece 'YOK' yaz."
+              }
+            ]
+          }]
+        })
+      });
+      const data = await response.json();
+      const text = data?.content?.[0]?.text?.trim() || "";
+      if (!text || text === "YOK" || text.toLowerCase().includes("yok")) return null;
+      // Sadece rakam ve alfanumerik karakterleri döndür
+      const cleaned = text.replace(/[^A-Z0-9\-]/gi, "").trim();
+      return cleaned.length >= 4 ? cleaned : null;
+    } catch {
+      return null;
+    }
+  };
+
   const startBarcodeCheck = async () => {
     setBarcodeCheckResult(null);
     try {
@@ -1028,32 +1072,51 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const codeReader = new BrowserMultiFormatReader(hints);
       const videoEl = barcodeCheckVideoRef.current;
       if (!videoEl) return;
-      const controls = await codeReader.decodeFromConstraints(
-        { video: { facingMode: "environment" } },
-        videoEl,
-        (result) => {
-          if (result) {
-            const barcodeValue = result.getText();
-            const product = products.find((p) => p.barcode === barcodeValue);
-            if (product) {
-              const item = batchItems.find((i) => i.product_id === product.id);
-              setBarcodeCheckResult({
-                found: true,
-                productName: product.name,
-                batchName: item ? batchMap.get(item.batch_id)?.name || "-" : "-",
-                depo: item?.depo || "-",
-                barcode: barcodeValue,
-                salePrice: item?.sale_price || 0,
-              });
-            } else {
-              setBarcodeCheckResult({ found: false, barcode: barcodeValue });
-            }
-            controls.stop();
-            barcodeCheckControlsRef.current = null;
-          }
+
+      let zxingFound = false;
+      const processBarcode = (barcodeValue: string) => {
+        if (zxingFound) return;
+        zxingFound = true;
+        const product = products.find((p) => p.barcode === barcodeValue);
+        if (product) {
+          const item = batchItems.find((i) => i.product_id === product.id);
+          setBarcodeCheckResult({
+            found: true,
+            productName: product.name,
+            batchName: item ? batchMap.get(item.batch_id)?.name || "-" : "-",
+            depo: item?.depo || "-",
+            barcode: barcodeValue,
+            salePrice: item?.sale_price || 0,
+          });
+        } else {
+          setBarcodeCheckResult({ found: false, barcode: barcodeValue });
         }
+        try { barcodeCheckControlsRef.current?.stop(); } catch {}
+        barcodeCheckControlsRef.current = null;
+      };
+
+      const controls = await codeReader.decodeFromConstraints(
+        { video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } } },
+        videoEl,
+        (result) => { if (result) processBarcode(result.getText()); }
       );
       barcodeCheckControlsRef.current = controls;
+
+      // Claude API fallback — her 800ms'de frame yakala
+      const claudeInterval = setInterval(async () => {
+        if (zxingFound) { clearInterval(claudeInterval); return; }
+        if (!videoEl.videoWidth) return;
+        const barcodeValue = await captureFrameAndAnalyze(videoEl);
+        if (barcodeValue && !zxingFound) {
+          clearInterval(claudeInterval);
+          processBarcode(barcodeValue);
+        }
+      }, 800);
+
+      // Orijinal stop'u wrap et — interval temizlensin
+      const origStop = controls.stop.bind(controls);
+      controls.stop = () => { clearInterval(claudeInterval); origStop(); };
+
     } catch {
       setBarcodeCheckResult({ found: false, barcode: "Kamera açılamadı" });
     }
@@ -1092,28 +1155,44 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const videoEl = videoRef.current;
       if (!videoEl) return;
 
-      const controls = await codeReader.decodeFromConstraints(
-        { video: { facingMode: "environment" } },
-        videoEl,
-        (result, err) => {
-          if (result) {
-            const barcodeValue = result.getText();
-            // Önce kamerayı kapat
-            try { controls.stop(); } catch {}
-            if (videoEl.srcObject) {
-              const stream = videoEl.srcObject as MediaStream;
-              stream.getTracks().forEach((t) => t.stop());
-              videoEl.srcObject = null;
-            }
-            scannerControlsRef.current = null;
-            setScannerOpen(false);
-            setScanning(false);
-            // Sonra barkodu işle
-            handleBarcodeScanned(barcodeValue);
-          }
+      let found = false;
+      const processBarcode = (barcodeValue: string) => {
+        if (found) return;
+        found = true;
+        try { scannerControlsRef.current?.stop(); } catch {}
+        if (videoEl.srcObject) {
+          const stream = videoEl.srcObject as MediaStream;
+          stream.getTracks().forEach((t) => t.stop());
+          videoEl.srcObject = null;
         }
+        scannerControlsRef.current = null;
+        setScannerOpen(false);
+        setScanning(false);
+        handleBarcodeScanned(barcodeValue);
+      };
+
+      const controls = await codeReader.decodeFromConstraints(
+        { video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } } },
+        videoEl,
+        (result) => { if (result) processBarcode(result.getText()); }
       );
       scannerControlsRef.current = controls;
+
+      // Claude API fallback — her 800ms'de frame yakala
+      const claudeInterval = setInterval(async () => {
+        if (found) { clearInterval(claudeInterval); return; }
+        if (!videoEl.videoWidth) return;
+        const barcodeValue = await captureFrameAndAnalyze(videoEl);
+        if (barcodeValue && !found) {
+          clearInterval(claudeInterval);
+          processBarcode(barcodeValue);
+        }
+      }, 800);
+
+      // Orijinal stop'u wrap et — interval temizlensin
+      const origStop = controls.stop.bind(controls);
+      controls.stop = () => { clearInterval(claudeInterval); origStop(); };
+
     } catch (err) {
       setScannerError("Kamera açılamadı. Tarayıcı iznini kontrol edin.");
       setScanning(false);
