@@ -1010,34 +1010,65 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   // Barkod kontrol tarayıcısını başlat
+  // Canvas pixel manipülasyonu: kontrast artır + gri tonla
+  const preprocessCanvas = (src: HTMLCanvasElement): string => {
+    const dst = document.createElement("canvas");
+    dst.width = src.width;
+    dst.height = src.height;
+    const ctx = dst.getContext("2d")!;
+    ctx.drawImage(src, 0, 0);
+    const imageData = ctx.getImageData(0, 0, dst.width, dst.height);
+    const d = imageData.data;
+    for (let i = 0; i < d.length; i += 4) {
+      // Gri tonlama
+      const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      // Kontrast artırma (factor=2.5)
+      const factor = 2.5;
+      const val = Math.min(255, Math.max(0, factor * (gray - 128) + 128));
+      d[i] = d[i + 1] = d[i + 2] = val;
+    }
+    ctx.putImageData(imageData, 0, 0);
+    return dst.toDataURL("image/jpeg", 0.95).split(",")[1];
+  };
+
   // Kamera frame'ini yakala ve Claude API ile barkod analizi yap
+  // Her çağrıda hem orijinal hem işlenmiş frame gönderilir
   const captureFrameAndAnalyze = async (videoEl: HTMLVideoElement): Promise<string | null> => {
     try {
+      const w = videoEl.videoWidth || 1280;
+      const h = videoEl.videoHeight || 720;
+
+      // Orijinal frame
       const canvas = document.createElement("canvas");
-      // Yüksek çözünürlük için video boyutunu kullan
-      canvas.width = videoEl.videoWidth || 1280;
-      canvas.height = videoEl.videoHeight || 720;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return null;
-      ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-      const base64 = canvas.toDataURL("image/jpeg", 0.92).split(",")[1];
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(videoEl, 0, 0, w, h);
+      const base64Original = canvas.toDataURL("image/jpeg", 0.95).split(",")[1];
+
+      // İşlenmiş frame (gri + kontrast)
+      const base64Processed = preprocessCanvas(canvas);
 
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-6",
-          max_tokens: 100,
+          max_tokens: 150,
           messages: [{
             role: "user",
             content: [
               {
                 type: "image",
-                source: { type: "base64", media_type: "image/jpeg", data: base64 }
+                source: { type: "base64", media_type: "image/jpeg", data: base64Original }
+              },
+              {
+                type: "image",
+                source: { type: "base64", media_type: "image/jpeg", data: base64Processed }
               },
               {
                 type: "text",
-                text: "Bu görselde bir barkod veya QR kod var mı? Varsa sadece barkod numarasını yaz, başka hiçbir şey yazma. Yoksa sadece 'YOK' yaz."
+                text: "Bu iki görselde (orijinal ve kontrast artırılmış) bir barkod veya QR kod arıyorum. İkinci görsel ilk görselin işlenmiş hali. Barkod veya QR kod rakamlarını bul ve SADECE o rakamları/karakterleri yaz. Başka hiçbir şey yazma. Barkod yoksa sadece 'YOK' yaz. Kırmızı veya renkli zemin üzerindeki beyaz/siyah barkodlara özellikle dikkat et."
               }
             ]
           }]
@@ -1047,7 +1078,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const text = data?.content?.[0]?.text?.trim() || "";
       if (!text || text === "YOK" || text.toLowerCase().includes("yok")) return null;
       // Sadece rakam ve alfanumerik karakterleri döndür
-      const cleaned = text.replace(/[^A-Z0-9\-]/gi, "").trim();
+      const cleaned = text.replace(/[^A-Z0-9]/gi, "").trim();
       return cleaned.length >= 4 ? cleaned : null;
     } catch {
       return null;
