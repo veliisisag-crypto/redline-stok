@@ -1,198 +1,104 @@
 -- =============================================
--- REDLINE - Supabase Schema
--- Rabia & Harun parfüm yönetim sistemi
+-- REDLINE STOK TAKİP SİSTEMİ - v2 Schema
 -- =============================================
 
--- Products
-create table products (
+-- Ürün Türleri
+create table product_types (
   id uuid primary key default gen_random_uuid(),
-  name text not null,
-  code text,
-  gender_category text check (gender_category in ('Kadın', 'Erkek', 'Unisex')),
-  image_url text,
-  passive boolean default false,
+  name text not null unique,
+  active boolean default true,
   created_at timestamptz default now()
 );
 
--- Customers (Cariler)
+-- Uygulama Kullanıcıları (çalışanlar + admin)
+create table app_users (
+  id uuid primary key default gen_random_uuid(),
+  email text not null unique,
+  name text not null,
+  role text not null check (role in ('admin', 'calisan')),
+  active boolean default true,
+  created_at timestamptz default now()
+);
+
+-- Müşteriler (dışarı satış carisi)
 create table customers (
   id uuid primary key default gen_random_uuid(),
   name text not null,
-  passive boolean default false,
+  active boolean default true,
   created_at timestamptz default now()
 );
 
--- Batches (Partiler)
-create table batches (
+-- Ürünler
+create table products (
   id uuid primary key default gen_random_uuid(),
   name text not null,
+  type_id uuid references product_types(id),
+  barcode text unique,
+  image_url text,
+  active boolean default true,
   created_at timestamptz default now()
 );
 
--- Batch Items (Parti kalemleri - depo bazlı)
-create table batch_items (
+-- Stok (ürün + depo bazlı miktar)
+create table stock_items (
   id uuid primary key default gen_random_uuid(),
-  batch_id uuid references batches(id),
-  product_id uuid references products(id),
-  bought integer not null default 0,
-  buy_price numeric not null default 0,
-  sale_price numeric not null default 0,
-  depo text default '56depo',
-  created_at timestamptz default now()
-);
-
--- Batch Costs (Parti maliyetleri)
-create table batch_costs (
-  id uuid primary key default gen_random_uuid(),
-  batch_id uuid references batches(id),
-  veli numeric default 0,
-  rabia numeric default 0,
-  harun numeric default 0,
-  kasa numeric default 0,
-  kargo numeric default 0,
-  diger numeric default 0,
-  aciklama text,
-  created_at timestamptz default now()
-);
-
--- Sales (Satışlar)
-create table sales (
-  id uuid primary key default gen_random_uuid(),
-  customer_id uuid references customers(id),
-  product_id uuid references products(id),
-  batch_id uuid references batches(id),
-  batch_item_id uuid references batch_items(id),
-  seller text check (seller in ('Rabia', 'Harun')),
-  sale_type text check (sale_type in ('Normal satış', 'Fire/Bozuk', 'Hibe')),
-  qty integer not null default 1,
-  total numeric not null default 0,
-  cost numeric not null default 0,
-  paid boolean default false,
-  paid_amount numeric default 0,
-  cancelled boolean default false,
-  depo text,
-  user_email text,
-  created_at timestamptz default now()
-);
-
--- Payments (Ödemeler)
-create table payments (
-  id uuid primary key default gen_random_uuid(),
-  customer_id uuid references customers(id),
-  amount numeric not null,
-  note text,
-  user_email text,
-  created_at timestamptz default now()
-);
-
--- Payment Allocations
-create table payment_allocations (
-  id uuid primary key default gen_random_uuid(),
-  payment_id uuid references payments(id),
-  sale_id uuid references sales(id),
-  amount numeric not null,
-  created_at timestamptz default now()
-);
-
--- Periods (Dönemler)
-create table periods (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
-  sponsor numeric default 0,
-  rabia numeric default 0,
-  harun numeric default 0,
-  product_cost numeric default 0,
-  shipping_cost numeric default 0,
-  rabia_contribution numeric default 0,
-  harun_contribution numeric default 0,
-  rabia_net_odeme numeric,
-  harun_net_odeme numeric,
-  rabia_distribution numeric,
-  harun_distribution numeric,
-  is_open boolean default true,
+  product_id uuid references products(id) not null,
+  depo text not null,
+  qty integer not null default 0,
   created_at timestamptz default now(),
-  closed_at timestamptz
+  updated_at timestamptz default now(),
+  unique(product_id, depo)
 );
 
--- Partner Ledger
-create table partner_ledger (
+-- Stok Hareketleri (giriş/çıkış geçmişi)
+create table stock_movements (
   id uuid primary key default gen_random_uuid(),
-  partner_name text check (partner_name in ('Veli', 'Rabia', 'Harun')),
-  contribution numeric default 0,
-  debt numeric default 0,
-  profit_share numeric default 0,
-  updated_at timestamptz default now()
-);
-
--- Preorders (Ön siparişler)
-create table preorders (
-  id uuid primary key default gen_random_uuid(),
+  product_id uuid references products(id) not null,
+  depo text not null,
+  movement_type text not null check (movement_type in ('giris', 'cikis')),
+  qty integer not null,
+  -- Çıkış detayları
+  exit_type text check (exit_type in ('satis', 'ic_kullanim')),
   customer_id uuid references customers(id),
-  created_by text,
+  employee_id uuid references app_users(id),
+  -- Genel
   note text,
-  status text default 'beklemede',
-  created_at timestamptz default now()
-);
-
--- Preorder Items
-create table preorder_items (
-  id uuid primary key default gen_random_uuid(),
-  preorder_id uuid references preorders(id),
-  product_id uuid references products(id),
-  qty integer not null default 1,
-  created_at timestamptz default now()
-);
-
--- Audit Log
-create table audit_log (
-  id uuid primary key default gen_random_uuid(),
-  action text,
-  entity_type text,
-  entity_name text,
-  details jsonb,
   user_email text,
   created_at timestamptz default now()
 );
 
 -- =============================================
--- İlk veriler: Partner Ledger
+-- RLS Policies
 -- =============================================
-insert into partner_ledger (partner_name, contribution, debt, profit_share) values
-  ('Veli', 0, 0, 0),
-  ('Rabia', 0, 0, 0),
-  ('Harun', 0, 0, 0);
-
--- =============================================
--- RLS Policies (tüm tablolar için)
--- =============================================
-alter table products enable row level security;
+alter table product_types enable row level security;
+alter table app_users enable row level security;
 alter table customers enable row level security;
-alter table batches enable row level security;
-alter table batch_items enable row level security;
-alter table batch_costs enable row level security;
-alter table sales enable row level security;
-alter table payments enable row level security;
-alter table payment_allocations enable row level security;
-alter table periods enable row level security;
-alter table partner_ledger enable row level security;
-alter table preorders enable row level security;
-alter table preorder_items enable row level security;
-alter table audit_log enable row level security;
+alter table products enable row level security;
+alter table stock_items enable row level security;
+alter table stock_movements enable row level security;
 
--- Authenticated kullanıcılar her şeyi yapabilir
-create policy "auth_all" on products for all to authenticated using (true) with check (true);
+create policy "auth_all" on product_types for all to authenticated using (true) with check (true);
+create policy "auth_all" on app_users for all to authenticated using (true) with check (true);
 create policy "auth_all" on customers for all to authenticated using (true) with check (true);
-create policy "auth_all" on batches for all to authenticated using (true) with check (true);
-create policy "auth_all" on batch_items for all to authenticated using (true) with check (true);
-create policy "auth_all" on batch_costs for all to authenticated using (true) with check (true);
-create policy "auth_all" on sales for all to authenticated using (true) with check (true);
-create policy "auth_all" on payments for all to authenticated using (true) with check (true);
-create policy "auth_all" on payment_allocations for all to authenticated using (true) with check (true);
-create policy "auth_all" on periods for all to authenticated using (true) with check (true);
-create policy "auth_all" on partner_ledger for all to authenticated using (true) with check (true);
-create policy "auth_all" on preorders for all to authenticated using (true) with check (true);
-create policy "auth_all" on preorder_items for all to authenticated using (true) with check (true);
-create policy "auth_all" on audit_log for all to authenticated using (true) with check (true);
+create policy "auth_all" on products for all to authenticated using (true) with check (true);
+create policy "auth_all" on stock_items for all to authenticated using (true) with check (true);
+create policy "auth_all" on stock_movements for all to authenticated using (true) with check (true);
 
--- Galeri için products tablosu herkese açık (public)
-create policy "public_read_products" on products for select to anon using (true);
+-- =============================================
+-- İlk veriler
+-- =============================================
+insert into product_types (name, active) values
+  ('Şampuan', true),
+  ('Boya', true),
+  ('Manikür', true),
+  ('Diğer', true);
+
+insert into app_users (email, name, role) values
+  ('admin@redline.com', 'Admin', 'admin'),
+  ('rabia@redline.com', 'Rabia', 'calisan'),
+  ('harun@redline.com', 'Harun', 'calisan'),
+  ('56kasa@redline.com', '56Kasa', 'calisan'),
+  ('anil@redline.com', 'Anıl', 'calisan');
+
+-- Storage policy (ürün resimleri için)
+-- Not: product-images bucket'ı Supabase Dashboard'dan public olarak oluşturulmalı
