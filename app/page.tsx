@@ -685,6 +685,8 @@ export default function StockApp() {
   // İÇ KULLANICI YÖNETİMİ
   // =============================================
   const [newInternalUserName, setNewInternalUserName] = useState("");
+  const [editingInternalUserId, setEditingInternalUserId] = useState<string | null>(null);
+  const [editingInternalUserName, setEditingInternalUserName] = useState("");
 
   const addInternalUser = async () => {
     const name = newInternalUserName.trim();
@@ -705,6 +707,14 @@ export default function StockApp() {
     if (error) return showError(error);
     setInternalUsers((prev) => prev.filter((u) => u.id !== id));
     showToast(`${name} silindi.`, "success");
+  };
+
+  const updateInternalUser = async (id: string, name: string) => {
+    if (!name.trim()) return;
+    await supabase.from("internal_users").update({ name: name.trim() }).eq("id", id);
+    setInternalUsers((prev) => prev.map((u) => u.id === id ? { ...u, name: name.trim() } : u));
+    setEditingInternalUserId(null);
+    showToast("Güncellendi.", "success");
   };
 
   const toggleInternalUserActive = async (id: string, active: boolean) => {
@@ -1240,10 +1250,21 @@ export default function StockApp() {
               <Table
                 headers={["İsim", "Durum", "İşlem"]}
                 rows={internalUsers.map((u) => [
-                  u.name,
+                  editingInternalUserId === u.id ? (
+                    <div className="flex gap-1">
+                      <input className="input py-1" value={editingInternalUserName} onChange={(e) => setEditingInternalUserName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") updateInternalUser(u.id, editingInternalUserName); if (e.key === "Escape") setEditingInternalUserId(null); }}
+                        autoFocus />
+                      <button type="button" className="btn text-xs px-2 py-1" onClick={() => updateInternalUser(u.id, editingInternalUserName)}>✓</button>
+                      <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => setEditingInternalUserId(null)}>✕</button>
+                    </div>
+                  ) : u.name,
                   <button type="button" className={`text-xs rounded-full px-2 py-1 ${u.active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
                     onClick={() => toggleInternalUserActive(u.id, u.active)}>{u.active ? "Aktif" : "Pasif"}</button>,
-                  <button type="button" className="btn-danger text-xs px-2 py-1" onClick={() => deleteInternalUser(u.id, u.name)}>Sil</button>,
+                  <div className="flex gap-1">
+                    <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => { setEditingInternalUserId(u.id); setEditingInternalUserName(u.name); }}>✎ Düzenle</button>
+                    <button type="button" className="btn-danger text-xs px-2 py-1" onClick={() => deleteInternalUser(u.id, u.name)}>Sil</button>
+                  </div>,
                 ])}
               />
             </Card>
