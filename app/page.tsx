@@ -625,7 +625,6 @@ export default function StockApp() {
     const qty = Number(stockOutForm.qty);
     if (!qty || qty <= 0) return showToast("Adet 0'dan büyük olmalı.", "error");
     if (!stockOutForm.depo) return showToast("Depo seçimi zorunlu.", "error");
-    if (stockOutForm.exitType === "satis" && !stockOutForm.customerId) return showToast("Satış için müşteri seçimi zorunlu.", "error");
     if (stockOutForm.exitType === "ic_kullanim" && !stockOutForm.internalUserId) return showToast("İç kullanım için kişi seçimi zorunlu.", "error");
 
     const currentStock = stockForProductDepo(stockOutForm.productId, stockOutForm.depo);
@@ -643,7 +642,7 @@ export default function StockApp() {
       const { data: moveData, error: moveErr } = await supabase.from("stock_movements").insert({
         product_id: stockOutForm.productId, depo: stockOutForm.depo, movement_type: "cikis", qty,
         exit_type: stockOutForm.exitType,
-        customer_id: stockOutForm.exitType === "satis" ? stockOutForm.customerId : null,
+        customer_id: null,
         employee_id: null,
         internal_user_id: stockOutForm.exitType === "ic_kullanim" ? stockOutForm.internalUserId : null,
         user_email: userData.user?.email || null,
@@ -1217,12 +1216,7 @@ export default function StockApp() {
               </div>
 
               <div className="mt-3">
-                {stockOutForm.exitType === "satis" ? (
-                  <select className="input" value={stockOutForm.customerId} onChange={(e) => setStockOutForm((p) => ({ ...p, customerId: e.target.value }))}>
-                    <option value="">Müşteri seçin</option>
-                    {activeCustomers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                ) : (
+                {stockOutForm.exitType === "ic_kullanim" && (
                   <select className="input" value={stockOutForm.internalUserId} onChange={(e) => setStockOutForm((p) => ({ ...p, internalUserId: e.target.value }))}>
                     <option value="">Kişi seçin</option>
                     {activeInternalUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
