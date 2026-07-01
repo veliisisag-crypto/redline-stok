@@ -15,7 +15,7 @@ type Product = { id: string; name: string; type_id: string | null; barcode: stri
 type StockItem = { id: string; product_id: string; depo: string; qty: number };
 type StockMovement = {
   id: string; product_id: string; depo: string; movement_type: "giris" | "cikis"; qty: number;
-  exit_type?: "satis" | "ic_kullanim" | null; customer_id?: string | null; employee_id?: string | null;
+  exit_type?: "satis" | "ic_kullanim" | null; customer_id?: string | null; employee_id?: string | null; internal_user_id?: string | null;
   note?: string | null; user_email?: string | null; created_at: string;
 };
 
@@ -644,7 +644,8 @@ export default function StockApp() {
         product_id: stockOutForm.productId, depo: stockOutForm.depo, movement_type: "cikis", qty,
         exit_type: stockOutForm.exitType,
         customer_id: stockOutForm.exitType === "satis" ? stockOutForm.customerId : null,
-        employee_id: stockOutForm.exitType === "ic_kullanim" ? stockOutForm.internalUserId : null,
+        employee_id: null,
+        internal_user_id: stockOutForm.exitType === "ic_kullanim" ? stockOutForm.internalUserId : null,
         user_email: userData.user?.email || null,
       }).select().single();
       if (moveErr) throw moveErr;
@@ -905,7 +906,7 @@ export default function StockApp() {
                   m.depo,
                   m.qty,
                   m.movement_type === "cikis"
-                    ? (m.exit_type === "satis" ? `Satış: ${customerMap.get(m.customer_id || "")?.name || "-"}` : `İç kullanım: ${internalUserMap.get(m.employee_id || "")?.name || userMap.get(m.employee_id || "")?.name || "-"}`)
+                    ? (m.exit_type === "satis" ? `Satış: ${customerMap.get(m.customer_id || "")?.name || "-"}` : `İç kullanım: ${internalUserMap.get(m.internal_user_id || "")?.name || userMap.get(m.employee_id || "")?.name || "-"}`)
                     : "-",
                 ])}
               />
@@ -1313,7 +1314,7 @@ export default function StockApp() {
                 m.depo,
                 m.qty,
                 m.movement_type === "cikis"
-                  ? (m.exit_type === "satis" ? `Satış → ${customerMap.get(m.customer_id || "")?.name || "-"}` : `İç kullanım → ${internalUserMap.get(m.employee_id || "")?.name || userMap.get(m.employee_id || "")?.name || "-"}`)
+                  ? (m.exit_type === "satis" ? `Satış → ${customerMap.get(m.customer_id || "")?.name || "-"}` : `İç kullanım → ${internalUserMap.get(m.internal_user_id || "")?.name || userMap.get(m.employee_id || "")?.name || "-"}`)
                   : "-",
                 m.user_email || "-",
               ])}
