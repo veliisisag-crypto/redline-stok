@@ -1313,11 +1313,22 @@ export default function StockApp() {
                 m.user_email || "-",
                 ...(currentUserRole === "admin" ? [
                   <button type="button" className="btn-danger text-xs px-2 py-1" onClick={async () => {
-                    if (!confirm("Bu hareket silinsin mi? Stok miktarı geri alınmaz!")) return;
+                    if (!confirm("Bu hareket silinsin mi? Stok miktarı da geri alınacak!")) return;
+                    // Stoku tersine çevir
+                    const existing = stockItems.find((s) => s.product_id === m.product_id && s.depo === m.depo);
+                    if (existing) {
+                      const newQty = m.movement_type === "cikis"
+                        ? existing.qty + m.qty   // çıkış silindi → stoğa geri ekle
+                        : existing.qty - m.qty;  // giriş silindi → stoktan düş
+                      const { error: stockErr } = await supabase.from("stock_items").update({ qty: Math.max(newQty, 0) }).eq("id", existing.id);
+                      if (stockErr) return showError(stockErr);
+                      setStockItems((prev) => prev.map((s) => s.id === existing.id ? { ...s, qty: Math.max(newQty, 0) } : s));
+                    }
+                    // Hareketi sil
                     const { error } = await supabase.from("stock_movements").delete().eq("id", m.id);
                     if (error) return showError(error);
                     setMovements((prev) => prev.filter((x) => x.id !== m.id));
-                    showToast("Hareket silindi.", "success");
+                    showToast("Hareket silindi, stok güncellendi.", "success");
                   }}>Sil</button>
                 ] : []),
               ])}
