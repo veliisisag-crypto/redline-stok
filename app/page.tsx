@@ -368,6 +368,62 @@ export default function StockApp() {
   const wizardScanControlsRef = useRef<{ stop: () => void } | null>(null);
   const [wizardScanOn, setWizardScanOn] = useState(false);
   const [wizardScanError, setWizardScanError] = useState("");
+  const claudeFallbackRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Claude API ile frame analizi (fallback)
+  const analyzeFrameWithClaude = async (videoEl: HTMLVideoElement): Promise<string | null> => {
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = videoEl.videoWidth;
+      canvas.height = videoEl.videoHeight;
+      canvas.getContext("2d")!.drawImage(videoEl, 0, 0);
+      const base64 = canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
+
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 100,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+              { type: "text", text: "Bu görselde bir barkod var mı? Varsa sadece barkod numarasını yaz, başka hiçbir şey yazma. Yoksa sadece 'yok' yaz." }
+            ]
+          }]
+        })
+      });
+      const data = await response.json();
+      const text = data.content?.[0]?.text?.trim() || "";
+      if (text && text !== "yok" && text.toLowerCase() !== "yok" && /\d{8,}/.test(text)) {
+        const match = text.match(/\d{8,}/);
+        return match ? match[0] : null;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const stopClaudeFallback = () => {
+    if (claudeFallbackRef.current) {
+      clearInterval(claudeFallbackRef.current);
+      claudeFallbackRef.current = null;
+    }
+  };
+
+  const startClaudeFallback = (videoEl: HTMLVideoElement, onFound: (code: string) => void) => {
+    stopClaudeFallback();
+    // 2 saniyede bir dene
+    claudeFallbackRef.current = setInterval(async () => {
+      const code = await analyzeFrameWithClaude(videoEl);
+      if (code) {
+        stopClaudeFallback();
+        onFound(code);
+      }
+    }, 2000);
+  };
 
   const startWizardScan = async () => {
     setWizardScanOn(true);
@@ -376,28 +432,42 @@ export default function StockApp() {
       const { BrowserMultiFormatReader } = await import("@zxing/browser");
       const { BarcodeFormat, DecodeHintType } = await import("@zxing/library");
       const hints = new Map();
-      hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.EAN_13]);
-      const codeReader = new BrowserMultiFormatReader(hints);
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+        BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A,
+        BarcodeFormat.UPC_E, BarcodeFormat.CODE_128, BarcodeFormat.CODE_39,
+      ]);
+      hints.set(DecodeHintType.TRY_HARDER, true);
+      const codeReader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 100 });
       const videoEl = wizardScanVideoRef.current;
       if (!videoEl) return;
+
+      const handleFound = (code: string) => {
+        stopClaudeFallback();
+        try { wizardScanControlsRef.current?.stop(); } catch {}
+        if (videoEl.srcObject) {
+          (videoEl.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
+          videoEl.srcObject = null;
+        }
+        wizardScanControlsRef.current = null;
+        setWizardScanOn(false);
+        setWizardData((prev) => ({ ...prev, barcode: code }));
+      };
+
       const controls = await codeReader.decodeFromConstraints(
-        { video: { facingMode: "environment" } },
+        { video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } } },
         videoEl,
         (result) => {
-          if (result) {
-            const code = result.getText();
-            try { controls.stop(); } catch {}
-            if (videoEl.srcObject) {
-              (videoEl.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
-              videoEl.srcObject = null;
-            }
-            wizardScanControlsRef.current = null;
-            setWizardScanOn(false);
-            setWizardData((prev) => ({ ...prev, barcode: code }));
-          }
+          if (result) handleFound(result.getText());
         }
       );
       wizardScanControlsRef.current = controls;
+
+      // Kamera hazır olunca Claude fallback başlat
+      setTimeout(() => {
+        if (videoEl.readyState >= 2) startClaudeFallback(videoEl, handleFound);
+        else videoEl.onloadeddata = () => startClaudeFallback(videoEl, handleFound);
+      }, 1500);
+
     } catch {
       setWizardScanError("Kamera açılamadı.");
       setWizardScanOn(false);
@@ -405,6 +475,7 @@ export default function StockApp() {
   };
 
   const stopWizardScan = () => {
+    stopClaudeFallback();
     try { wizardScanControlsRef.current?.stop(); } catch {}
     wizardScanControlsRef.current = null;
     if (wizardScanVideoRef.current?.srcObject) {
@@ -497,30 +568,39 @@ export default function StockApp() {
       const { BrowserMultiFormatReader } = await import("@zxing/browser");
       const { BarcodeFormat, DecodeHintType } = await import("@zxing/library");
       const hints = new Map();
-      hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.EAN_13]);
-      const codeReader = new BrowserMultiFormatReader(hints);
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+        BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A,
+        BarcodeFormat.UPC_E, BarcodeFormat.CODE_128, BarcodeFormat.CODE_39,
+      ]);
+      hints.set(DecodeHintType.TRY_HARDER, true);
+      const codeReader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 100 });
       const videoEl = stockInVideoRef.current;
       if (!videoEl) return;
-      const controls = await codeReader.decodeFromConstraints(
-        { video: { facingMode: "environment" } }, videoEl,
-        (result) => {
-          if (result) {
-            const code = result.getText();
-            try { controls.stop(); } catch {}
-            if (videoEl.srcObject) { (videoEl.srcObject as MediaStream).getTracks().forEach((t) => t.stop()); videoEl.srcObject = null; }
-            stockInControlsRef.current = null;
-            setStockInScanOn(false);
-            const product = products.find((p) => p.barcode === code);
-            if (product) {
-              setStockInForm((prev) => ({ ...prev, productId: product.id }));
-              showToast(`✅ ${product.name} bulundu.`, "success");
-            } else {
-              showToast(`Barkod bulunamadı: ${code}`, "error");
-            }
-          }
+
+      const handleFound = (code: string) => {
+        stopClaudeFallback();
+        try { stockInControlsRef.current?.stop(); } catch {}
+        if (videoEl.srcObject) { (videoEl.srcObject as MediaStream).getTracks().forEach((t) => t.stop()); videoEl.srcObject = null; }
+        stockInControlsRef.current = null;
+        setStockInScanOn(false);
+        const product = products.find((p) => p.barcode === code);
+        if (product) {
+          setStockInForm((prev) => ({ ...prev, productId: product.id }));
+          showToast(`✅ ${product.name} bulundu.`, "success");
+        } else {
+          showToast(`Barkod bulunamadı: ${code}`, "error");
         }
+      };
+
+      const controls = await codeReader.decodeFromConstraints(
+        { video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } } }, videoEl,
+        (result) => { if (result) handleFound(result.getText()); }
       );
       stockInControlsRef.current = controls;
+      setTimeout(() => {
+        if (videoEl.readyState >= 2) startClaudeFallback(videoEl, handleFound);
+        else videoEl.onloadeddata = () => startClaudeFallback(videoEl, handleFound);
+      }, 1500);
     } catch {
       showToast("Kamera açılamadı.", "error");
       setStockInScanOn(false);
@@ -528,6 +608,7 @@ export default function StockApp() {
   };
 
   const stopStockInScan = () => {
+    stopClaudeFallback();
     try { stockInControlsRef.current?.stop(); } catch {}
     stockInControlsRef.current = null;
     if (stockInVideoRef.current?.srcObject) { (stockInVideoRef.current.srcObject as MediaStream).getTracks().forEach((t) => t.stop()); stockInVideoRef.current.srcObject = null; }
@@ -581,32 +662,40 @@ export default function StockApp() {
       const { BrowserMultiFormatReader } = await import("@zxing/browser");
       const { BarcodeFormat, DecodeHintType } = await import("@zxing/library");
       const hints = new Map();
-      hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.EAN_13]);
-      const codeReader = new BrowserMultiFormatReader(hints);
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+        BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A,
+        BarcodeFormat.UPC_E, BarcodeFormat.CODE_128, BarcodeFormat.CODE_39,
+      ]);
+      hints.set(DecodeHintType.TRY_HARDER, true);
+      const codeReader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 100 });
       const videoEl = stockOutVideoRef.current;
       if (!videoEl) return;
-      const controls = await codeReader.decodeFromConstraints(
-        { video: { facingMode: "environment" } }, videoEl,
-        (result) => {
-          if (result) {
-            const code = result.getText();
-            try { controls.stop(); } catch {}
-            if (videoEl.srcObject) { (videoEl.srcObject as MediaStream).getTracks().forEach((t) => t.stop()); videoEl.srcObject = null; }
-            stockOutControlsRef.current = null;
-            setStockOutScanOn(false);
-            const product = products.find((p) => p.barcode === code);
-            if (product) {
-              // Stoklu ilk depoyu öner
-              const firstStockDepo = stockForProduct(product.id).find((s) => s.qty > 0)?.depo || stockOutForm.depo;
-              setStockOutForm((prev) => ({ ...prev, productId: product.id, depo: firstStockDepo }));
-              showToast(`✅ ${product.name} bulundu.`, "success");
-            } else {
-              showToast(`Barkod bulunamadı: ${code}. Listeden seçin.`, "error");
-            }
-          }
+
+      const handleFound = (code: string) => {
+        stopClaudeFallback();
+        try { stockOutControlsRef.current?.stop(); } catch {}
+        if (videoEl.srcObject) { (videoEl.srcObject as MediaStream).getTracks().forEach((t) => t.stop()); videoEl.srcObject = null; }
+        stockOutControlsRef.current = null;
+        setStockOutScanOn(false);
+        const product = products.find((p) => p.barcode === code);
+        if (product) {
+          const firstStockDepo = stockForProduct(product.id).find((s) => s.qty > 0)?.depo || stockOutForm.depo;
+          setStockOutForm((prev) => ({ ...prev, productId: product.id, depo: firstStockDepo }));
+          showToast(`✅ ${product.name} bulundu.`, "success");
+        } else {
+          showToast(`Barkod bulunamadı: ${code}. Listeden seçin.`, "error");
         }
+      };
+
+      const controls = await codeReader.decodeFromConstraints(
+        { video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } } }, videoEl,
+        (result) => { if (result) handleFound(result.getText()); }
       );
       stockOutControlsRef.current = controls;
+      setTimeout(() => {
+        if (videoEl.readyState >= 2) startClaudeFallback(videoEl, handleFound);
+        else videoEl.onloadeddata = () => startClaudeFallback(videoEl, handleFound);
+      }, 1500);
     } catch {
       showToast("Kamera açılamadı.", "error");
       setStockOutScanOn(false);
@@ -614,6 +703,7 @@ export default function StockApp() {
   };
 
   const stopStockOutScan = () => {
+    stopClaudeFallback();
     try { stockOutControlsRef.current?.stop(); } catch {}
     stockOutControlsRef.current = null;
     if (stockOutVideoRef.current?.srcObject) { (stockOutVideoRef.current.srcObject as MediaStream).getTracks().forEach((t) => t.stop()); stockOutVideoRef.current.srcObject = null; }
@@ -1141,10 +1231,10 @@ export default function StockApp() {
               {wizardScanError ? (
                 <div className="rounded-xl bg-red-900/50 p-4 text-center text-sm text-red-300">{wizardScanError}</div>
               ) : (
-                <div className="relative overflow-hidden rounded-xl" style={{aspectRatio:"3/2"}}>
+                <div className="relative overflow-hidden rounded-xl" style={{aspectRatio:"4/3"}}>
                   <video ref={wizardScanVideoRef} className="h-full w-full object-cover" autoPlay playsInline muted />
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="h-20 w-56 rounded-xl border-4 border-white/60" style={{boxShadow:"0 0 0 9999px rgba(0,0,0,0.5)"}} />
+                    <div className="h-24 w-72 rounded-lg border-4 border-red-400" style={{boxShadow:"0 0 0 9999px rgba(0,0,0,0.6)"}} />
                   </div>
                   <div className="absolute bottom-4 left-0 right-0 text-center text-sm text-white/80">Barkodu çerçeve içine alın...</div>
                 </div>
@@ -1380,10 +1470,10 @@ export default function StockApp() {
                 <h3 className="text-lg font-bold text-white">📷 Barkod Tara</h3>
                 <button type="button" className="rounded-full bg-white/20 px-3 py-1 text-sm text-white" onClick={stopStockInScan}>Kapat</button>
               </div>
-              <div className="relative overflow-hidden rounded-xl" style={{aspectRatio:"3/2"}}>
+              <div className="relative overflow-hidden rounded-xl" style={{aspectRatio:"4/3"}}>
                 <video ref={stockInVideoRef} className="h-full w-full object-cover" autoPlay playsInline muted />
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="h-20 w-56 rounded-xl border-4 border-white/60" style={{boxShadow:"0 0 0 9999px rgba(0,0,0,0.5)"}} />
+                  <div className="h-24 w-72 rounded-lg border-4 border-red-400" style={{boxShadow:"0 0 0 9999px rgba(0,0,0,0.6)"}} />
                 </div>
               </div>
             </div>
@@ -1398,10 +1488,10 @@ export default function StockApp() {
                 <h3 className="text-lg font-bold text-white">📷 Barkod Tara</h3>
                 <button type="button" className="rounded-full bg-white/20 px-3 py-1 text-sm text-white" onClick={stopStockOutScan}>Kapat</button>
               </div>
-              <div className="relative overflow-hidden rounded-xl" style={{aspectRatio:"3/2"}}>
+              <div className="relative overflow-hidden rounded-xl" style={{aspectRatio:"4/3"}}>
                 <video ref={stockOutVideoRef} className="h-full w-full object-cover" autoPlay playsInline muted />
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="h-20 w-56 rounded-xl border-4 border-white/60" style={{boxShadow:"0 0 0 9999px rgba(0,0,0,0.5)"}} />
+                  <div className="h-24 w-72 rounded-lg border-4 border-red-400" style={{boxShadow:"0 0 0 9999px rgba(0,0,0,0.6)"}} />
                 </div>
               </div>
             </div>
