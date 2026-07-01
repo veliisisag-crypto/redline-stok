@@ -750,7 +750,13 @@ export default function StockApp() {
           const firstStockDepo = stockForProduct(product.id).find((s) => s.qty > 0)?.depo || stockOutForm.depo;
           const totalStock = stockForProduct(product.id).reduce((s, i) => s + i.qty, 0);
           setStockOutForm((prev) => ({ ...prev, productId: product.id, depo: firstStockDepo }));
-          setScanResultModal({ productName: product.name, totalStock, found: true });
+          if (totalStock === 0) {
+            // Stok yoksa modal göster
+            setScanResultModal({ productName: product.name, totalStock, found: true });
+          } else {
+            // Stok varsa sessizce doldur, kısa toast yeterli
+            showToast(`✅ ${product.name}`, "success");
+          }
         } else {
           setScanResultModal({ productName: "", totalStock: 0, found: false, code });
         }
