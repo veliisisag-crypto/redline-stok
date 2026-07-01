@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 type ProductType = { id: string; name: string; active: boolean };
 type AppUser = { id: string; email: string; name: string; role: "admin" | "calisan"; active: boolean; created_at: string };
 type Customer = { id: string; name: string; active: boolean };
+type InternalUser = { id: string; name: string; active: boolean; created_at: string };
 type Product = { id: string; name: string; type_id: string | null; barcode: string | null; image_url: string | null; active: boolean; created_at: string };
 type StockItem = { id: string; product_id: string; depo: string; qty: number };
 type StockMovement = {
@@ -92,6 +93,7 @@ export default function StockApp() {
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
   const [productTypes, setProductTypes] = useState<ProductType[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [internalUsers, setInternalUsers] = useState<InternalUser[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -141,16 +143,17 @@ export default function StockApp() {
       const email = userData.user?.email || "";
       setCurrentUserEmail(email);
 
-      const [usersRes, typesRes, customersRes, productsRes, stockRes, movementsRes] = await Promise.all([
+      const [usersRes, typesRes, customersRes, internalUsersRes, productsRes, stockRes, movementsRes] = await Promise.all([
         supabase.from("app_users").select("*").order("name", { ascending: true }),
         supabase.from("product_types").select("*").order("name", { ascending: true }),
         supabase.from("customers").select("*").order("name", { ascending: true }),
+        supabase.from("internal_users").select("*").order("name", { ascending: true }),
         supabase.from("products").select("*").order("created_at", { ascending: true }),
         supabase.from("stock_items").select("*"),
         supabase.from("stock_movements").select("*").order("created_at", { ascending: false }).limit(500),
       ]);
 
-      for (const res of [usersRes, typesRes, customersRes, productsRes, stockRes, movementsRes]) {
+      for (const res of [usersRes, typesRes, customersRes, internalUsersRes, productsRes, stockRes, movementsRes]) {
         if (res.error) throw res.error;
       }
 
@@ -158,6 +161,7 @@ export default function StockApp() {
       setAppUsers(allUsers);
       setProductTypes((typesRes.data || []) as ProductType[]);
       setCustomers((customersRes.data || []) as Customer[]);
+      setInternalUsers((internalUsersRes.data || []) as InternalUser[]);
       setProducts((productsRes.data || []) as Product[]);
       setStockItems((stockRes.data || []) as StockItem[]);
       setMovements((movementsRes.data || []) as StockMovement[]);
@@ -182,6 +186,8 @@ export default function StockApp() {
   const typeMap = useMemo(() => new Map(productTypes.map((t) => [t.id, t])), [productTypes]);
   const customerMap = useMemo(() => new Map(customers.map((c) => [c.id, c])), [customers]);
   const userMap = useMemo(() => new Map(appUsers.map((u) => [u.id, u])), [appUsers]);
+  const internalUserMap = useMemo(() => new Map(internalUsers.map((u) => [u.id, u])), [internalUsers]);
+  const activeInternalUsers = useMemo(() => internalUsers.filter((u) => u.active), [internalUsers]);
 
   const stockForProduct = (productId: string) => stockItems.filter((s) => s.product_id === productId);
   const totalStockForProduct = (productId: string) => stockForProduct(productId).reduce((sum, s) => sum + s.qty, 0);
@@ -200,6 +206,7 @@ export default function StockApp() {
 
   const subMenu: [string, string][] = ([
     ["customers", "Müşteriler"],
+    ["internalUsers", "İç Kullanıcılar"],
     ["movements", "Hareket Geçmişi"],
     ["admin", "Kullanıcı Yönetimi"],
   ] as [string, string][]).filter(([key]) => currentUserRole === "admin" || key !== "admin");
@@ -563,7 +570,7 @@ export default function StockApp() {
   // =============================================
   // STOK ÇIKIŞI (barkod tara → satış/iç kullanım)
   // =============================================
-  const [stockOutForm, setStockOutForm] = useState({ productId: "", qty: "1", depo: DEPOLAR[0], exitType: "satis" as "satis" | "ic_kullanim", customerId: "", employeeId: "" });
+  const [stockOutForm, setStockOutForm] = useState({ typeId: "", productId: "", qty: "1", depo: DEPOLAR[0], exitType: "satis" as "satis" | "ic_kullanim", customerId: "", internalUserId: "" });
   const [stockOutScanOn, setStockOutScanOn] = useState(false);
   const stockOutVideoRef = useRef<HTMLVideoElement>(null);
   const stockOutControlsRef = useRef<{ stop: () => void } | null>(null);
@@ -619,7 +626,7 @@ export default function StockApp() {
     if (!qty || qty <= 0) return showToast("Adet 0'dan büyük olmalı.", "error");
     if (!stockOutForm.depo) return showToast("Depo seçimi zorunlu.", "error");
     if (stockOutForm.exitType === "satis" && !stockOutForm.customerId) return showToast("Satış için müşteri seçimi zorunlu.", "error");
-    if (stockOutForm.exitType === "ic_kullanim" && !stockOutForm.employeeId) return showToast("İç kullanım için çalışan seçimi zorunlu.", "error");
+    if (stockOutForm.exitType === "ic_kullanim" && !stockOutForm.internalUserId) return showToast("İç kullanım için kişi seçimi zorunlu.", "error");
 
     const currentStock = stockForProductDepo(stockOutForm.productId, stockOutForm.depo);
     if (currentStock < qty) return showToast(`Yetersiz stok. ${stockOutForm.depo} deposunda sadece ${currentStock} adet var.`, "error");
@@ -637,13 +644,13 @@ export default function StockApp() {
         product_id: stockOutForm.productId, depo: stockOutForm.depo, movement_type: "cikis", qty,
         exit_type: stockOutForm.exitType,
         customer_id: stockOutForm.exitType === "satis" ? stockOutForm.customerId : null,
-        employee_id: stockOutForm.exitType === "ic_kullanim" ? stockOutForm.employeeId : null,
+        employee_id: stockOutForm.exitType === "ic_kullanim" ? stockOutForm.internalUserId : null,
         user_email: userData.user?.email || null,
       }).select().single();
       if (moveErr) throw moveErr;
       setMovements((prev) => [moveData as StockMovement, ...prev]);
       showToast("Stok çıkışı kaydedildi.", "success");
-      setStockOutForm({ productId: "", qty: "1", depo: stockOutForm.depo, exitType: "satis", customerId: "", employeeId: "" });
+      setStockOutForm({ typeId: "", productId: "", qty: "1", depo: stockOutForm.depo, exitType: "satis", customerId: "", internalUserId: "" });
     } catch (err) {
       showError(err);
     } finally {
@@ -672,6 +679,37 @@ export default function StockApp() {
   const toggleCustomerActive = async (id: string, active: boolean) => {
     await supabase.from("customers").update({ active: !active }).eq("id", id);
     setCustomers((prev) => prev.map((c) => c.id === id ? { ...c, active: !active } : c));
+  };
+
+  // =============================================
+  // İÇ KULLANICI YÖNETİMİ
+  // =============================================
+  const [newInternalUserName, setNewInternalUserName] = useState("");
+
+  const addInternalUser = async () => {
+    const name = newInternalUserName.trim();
+    if (!name) return;
+    if (processing) return;
+    setProcessing(true);
+    const { data, error } = await supabase.from("internal_users").insert({ name, active: true }).select().single();
+    setProcessing(false);
+    if (error) return showError(error);
+    setInternalUsers((prev) => [...prev, data as InternalUser]);
+    setNewInternalUserName("");
+    showToast(`${name} eklendi.`, "success");
+  };
+
+  const deleteInternalUser = async (id: string, name: string) => {
+    if (!confirm(`"${name}" silinsin mi?`)) return;
+    const { error } = await supabase.from("internal_users").delete().eq("id", id);
+    if (error) return showError(error);
+    setInternalUsers((prev) => prev.filter((u) => u.id !== id));
+    showToast(`${name} silindi.`, "success");
+  };
+
+  const toggleInternalUserActive = async (id: string, active: boolean) => {
+    await supabase.from("internal_users").update({ active: !active }).eq("id", id);
+    setInternalUsers((prev) => prev.map((u) => u.id === id ? { ...u, active: !active } : u));
   };
 
   // =============================================
@@ -857,7 +895,7 @@ export default function StockApp() {
                   m.depo,
                   m.qty,
                   m.movement_type === "cikis"
-                    ? (m.exit_type === "satis" ? `Satış: ${customerMap.get(m.customer_id || "")?.name || "-"}` : `İç kullanım: ${userMap.get(m.employee_id || "")?.name || "-"}`)
+                    ? (m.exit_type === "satis" ? `Satış: ${customerMap.get(m.customer_id || "")?.name || "-"}` : `İç kullanım: ${internalUserMap.get(m.employee_id || "")?.name || userMap.get(m.employee_id || "")?.name || "-"}`)
                     : "-",
                 ])}
               />
@@ -1137,10 +1175,18 @@ export default function StockApp() {
             <Card title="Stoktan Çıkış" action={
               <button type="button" className="btn-secondary" onClick={() => { setStockOutScanOn(true); setTimeout(startStockOutScan, 300); }}>📷 Barkod Tara</button>
             }>
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid gap-3 md:grid-cols-2">
+                {/* Tür seçimi */}
+                <select className="input" value={stockOutForm.typeId} onChange={(e) => setStockOutForm((p) => ({ ...p, typeId: e.target.value, productId: "" }))}>
+                  <option value="">Tüm türler</option>
+                  {productTypes.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                {/* Ürün seçimi — türe göre filtrelenmiş */}
                 <select className="input" value={stockOutForm.productId} onChange={(e) => setStockOutForm((p) => ({ ...p, productId: e.target.value }))}>
                   <option value="">Ürün seçin</option>
-                  {activeProducts.filter((p) => totalStockForProduct(p.id) > 0).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {activeProducts
+                    .filter((p) => totalStockForProduct(p.id) > 0 && (!stockOutForm.typeId || p.type_id === stockOutForm.typeId))
+                    .map((p) => <option key={p.id} value={p.id}>{p.name} ({totalStockForProduct(p.id)} adet)</option>)}
                 </select>
                 <select className="input" value={stockOutForm.depo} onChange={(e) => setStockOutForm((p) => ({ ...p, depo: e.target.value }))}>
                   {DEPOLAR.map((d) => <option key={d} value={d}>{d} ({stockOutForm.productId ? stockForProductDepo(stockOutForm.productId, d) : "-"} adet)</option>)}
@@ -1166,14 +1212,40 @@ export default function StockApp() {
                     {activeCustomers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 ) : (
-                  <select className="input" value={stockOutForm.employeeId} onChange={(e) => setStockOutForm((p) => ({ ...p, employeeId: e.target.value }))}>
-                    <option value="">Çalışan seçin</option>
-                    {activeEmployees.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  <select className="input" value={stockOutForm.internalUserId} onChange={(e) => setStockOutForm((p) => ({ ...p, internalUserId: e.target.value }))}>
+                    <option value="">Kişi seçin</option>
+                    {activeInternalUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                   </select>
                 )}
               </div>
 
               <button type="button" className="btn-primary mt-3" disabled={processing} onClick={submitStockOut}>{processing ? "Kaydediliyor..." : "Çıkışı Kaydet"}</button>
+            </Card>
+          </div>
+        )}
+
+        {/* ============ İÇ KULLANICILAR ============ */}
+        {active === "internalUsers" && (
+          <div>
+            <Card title="Yeni İç Kullanıcı Ekle">
+              <div className="flex gap-2">
+                <input className="input flex-1" placeholder="İsim (örn: Ayşe, Mehmet)" value={newInternalUserName}
+                  onChange={(e) => setNewInternalUserName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") addInternalUser(); }} />
+                <button type="button" className="btn" disabled={processing} onClick={addInternalUser}>{processing ? "..." : "Ekle"}</button>
+              </div>
+              <p className="mt-2 text-xs text-slate-400">Stoktan iç kullanım ile ürün alan kişiler (uygulama hesabı gerekmez)</p>
+            </Card>
+            <Card title="İç Kullanıcı Listesi">
+              <Table
+                headers={["İsim", "Durum", "İşlem"]}
+                rows={internalUsers.map((u) => [
+                  u.name,
+                  <button type="button" className={`text-xs rounded-full px-2 py-1 ${u.active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
+                    onClick={() => toggleInternalUserActive(u.id, u.active)}>{u.active ? "Aktif" : "Pasif"}</button>,
+                  <button type="button" className="btn-danger text-xs px-2 py-1" onClick={() => deleteInternalUser(u.id, u.name)}>Sil</button>,
+                ])}
+              />
             </Card>
           </div>
         )}
@@ -1214,7 +1286,7 @@ export default function StockApp() {
                 m.depo,
                 m.qty,
                 m.movement_type === "cikis"
-                  ? (m.exit_type === "satis" ? `Satış → ${customerMap.get(m.customer_id || "")?.name || "-"}` : `İç kullanım → ${userMap.get(m.employee_id || "")?.name || "-"}`)
+                  ? (m.exit_type === "satis" ? `Satış → ${customerMap.get(m.customer_id || "")?.name || "-"}` : `İç kullanım → ${internalUserMap.get(m.employee_id || "")?.name || userMap.get(m.employee_id || "")?.name || "-"}`)
                   : "-",
                 m.user_email || "-",
               ])}
