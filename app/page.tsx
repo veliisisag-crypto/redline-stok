@@ -280,34 +280,6 @@ export default function StockApp() {
   const [editingProduct, setEditingProduct] = useState<{ name: string; barcode: string; typeId: string; image: string }>({ name: "", barcode: "", typeId: "", image: "" });
   const [newProductTypeName, setNewProductTypeName] = useState("");
 
-  const saveProductEdit = async () => {
-    if (!editingProductId) return;
-    if (!editingProduct.name.trim()) return showToast("Ürün adı zorunlu.", "error");
-    setProcessing(true);
-    try {
-      let imageUrl = editingProduct.image;
-      // Eğer yeni resim seçildiyse (base64 ise) yükle
-      if (editingProduct.image && editingProduct.image.startsWith("data:")) {
-        imageUrl = await uploadImageToStorage(editingProduct.image, editingProduct.barcode || editingProductId) || imageUrl;
-      }
-      const update: Partial<Product> = {
-        name: editingProduct.name.trim(),
-        type_id: editingProduct.typeId || null,
-        barcode: editingProduct.barcode || null,
-        image_url: imageUrl || null,
-      };
-      const { error } = await supabase.from("products").update(update).eq("id", editingProductId);
-      if (error) throw error;
-      setProducts((prev) => prev.map((p) => p.id === editingProductId ? { ...p, ...update } : p));
-      setEditingProductId(null);
-      showToast("Ürün güncellendi.", "success");
-    } catch (err) {
-      showError(err);
-    } finally {
-      setProcessing(false);
-    }
-  };
-
   // Ürün edit kamera
   const editProductPhotoVideoRef = useRef<HTMLVideoElement>(null);
   const editProductPhotoStreamRef = useRef<MediaStream | null>(null);
@@ -828,6 +800,46 @@ export default function StockApp() {
   // =============================================
   const [newCustomerName, setNewCustomerName] = useState("");
 
+  const deleteProduct = async (p: Product) => {
+    const hasStock = totalStockForProduct(p.id) > 0;
+    const hasMovements = movements.some((m) => m.product_id === p.id);
+    if (hasStock || hasMovements) {
+      const msg = [hasStock ? `${totalStockForProduct(p.id)} adet stok` : "", hasMovements ? "hareket geçmişi" : ""].filter(Boolean).join(" ve ");
+      if (!confirm(`"${p.name}" ürününün ${msg} var. Yine de silinsin mi?`)) return;
+    } else {
+      if (!confirm(`"${p.name}" silinsin mi?`)) return;
+    }
+    setProcessing(true);
+    try {
+      await supabase.from("stock_movements").delete().eq("product_id", p.id);
+      await supabase.from("stock_items").delete().eq("product_id", p.id);
+      const { error } = await supabase.from("products").delete().eq("id", p.id);
+      if (error) throw error;
+      setProducts((prev) => prev.filter((x) => x.id !== p.id));
+      setStockItems((prev) => prev.filter((x) => x.product_id !== p.id));
+      setMovements((prev) => prev.filter((x) => x.product_id !== p.id));
+      showToast(`"${p.name}" silindi.`, "success");
+    } catch (err) { showError(err); } finally { setProcessing(false); }
+  };
+
+  const saveProductEdit = async () => {
+    if (!editingProductId) return;
+    if (!editingProduct.name.trim()) return showToast("Ürün adı zorunlu.", "error");
+    setProcessing(true);
+    try {
+      let imageUrl = editingProduct.image;
+      if (editingProduct.image && editingProduct.image.startsWith("data:")) {
+        imageUrl = await uploadImageToStorage(editingProduct.image, editingProduct.barcode || editingProductId) || imageUrl;
+      }
+      const update: Partial<Product> = { name: editingProduct.name.trim(), type_id: editingProduct.typeId || null, barcode: editingProduct.barcode || null, image_url: imageUrl || null };
+      const { error } = await supabase.from("products").update(update).eq("id", editingProductId);
+      if (error) throw error;
+      setProducts((prev) => prev.map((p) => p.id === editingProductId ? { ...p, ...update } : p));
+      setEditingProductId(null);
+      showToast("Ürün güncellendi.", "success");
+    } catch (err) { showError(err); } finally { setProcessing(false); }
+  };
+
   const addCustomer = async () => {
     const name = newCustomerName.trim();
     if (!name) return;
@@ -1291,7 +1303,7 @@ export default function StockApp() {
                 </div>
               )}
               <Table
-                headers={["Foto", "Ürün", "Tür", "Barkod", "Stok", "Durum", "Düzenle"]}
+                headers={["Foto", "Ürün", "Tür", "Barkod", "Stok", "Durum", "İşlem"]}
                 rows={products.map((p) => [
                   p.image_url ? <img src={p.image_url} alt="" className="h-12 w-12 rounded-lg object-cover" /> : <div className="h-12 w-12 rounded-lg bg-slate-100" />,
                   <span className={editingProductId === p.id ? "font-bold text-blue-600" : ""}>{p.name}</span>,
@@ -1303,10 +1315,13 @@ export default function StockApp() {
                       await supabase.from("products").update({ active: !p.active }).eq("id", p.id);
                       setProducts((prev) => prev.map((x) => x.id === p.id ? { ...x, active: !p.active } : x));
                     }}>{p.active ? "Aktif" : "Pasif"}</button>,
-                  <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => {
-                    setEditingProductId(p.id);
-                    setEditingProduct({ name: p.name, barcode: p.barcode || "", typeId: p.type_id || "", image: p.image_url || "" });
-                  }}>✎</button>,
+                  <div className="flex gap-1">
+                    <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => {
+                      setEditingProductId(p.id);
+                      setEditingProduct({ name: p.name, barcode: p.barcode || "", typeId: p.type_id || "", image: p.image_url || "" });
+                    }}>✎</button>
+                    <button type="button" className="btn-danger text-xs px-2 py-1" disabled={processing} onClick={() => deleteProduct(p)}>Sil</button>
+                  </div>,
                 ])}
               />
             </Card>
