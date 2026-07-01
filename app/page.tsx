@@ -276,7 +276,74 @@ export default function StockApp() {
   // =============================================
   // ÜRÜN TÜRÜ YÖNETİMİ
   // =============================================
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [editingProduct, setEditingProduct] = useState<{ name: string; barcode: string; typeId: string; image: string }>({ name: "", barcode: "", typeId: "", image: "" });
   const [newProductTypeName, setNewProductTypeName] = useState("");
+
+  const saveProductEdit = async () => {
+    if (!editingProductId) return;
+    if (!editingProduct.name.trim()) return showToast("Ürün adı zorunlu.", "error");
+    setProcessing(true);
+    try {
+      let imageUrl = editingProduct.image;
+      // Eğer yeni resim seçildiyse (base64 ise) yükle
+      if (editingProduct.image && editingProduct.image.startsWith("data:")) {
+        imageUrl = await uploadImageToStorage(editingProduct.image, editingProduct.barcode || editingProductId) || imageUrl;
+      }
+      const update: Partial<Product> = {
+        name: editingProduct.name.trim(),
+        type_id: editingProduct.typeId || null,
+        barcode: editingProduct.barcode || null,
+        image_url: imageUrl || null,
+      };
+      const { error } = await supabase.from("products").update(update).eq("id", editingProductId);
+      if (error) throw error;
+      setProducts((prev) => prev.map((p) => p.id === editingProductId ? { ...p, ...update } : p));
+      setEditingProductId(null);
+      showToast("Ürün güncellendi.", "success");
+    } catch (err) {
+      showError(err);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Ürün edit kamera
+  const editProductPhotoVideoRef = useRef<HTMLVideoElement>(null);
+  const editProductPhotoStreamRef = useRef<MediaStream | null>(null);
+  const [editProductPhotoCaptureOn, setEditProductPhotoCaptureOn] = useState(false);
+
+  const openEditProductPhotoCapture = async () => {
+    setEditProductPhotoCaptureOn(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      editProductPhotoStreamRef.current = stream;
+      setTimeout(() => {
+        if (editProductPhotoVideoRef.current) {
+          editProductPhotoVideoRef.current.srcObject = stream;
+          editProductPhotoVideoRef.current.play();
+        }
+      }, 100);
+    } catch {
+      showToast("Kamera açılamadı.", "error");
+      setEditProductPhotoCaptureOn(false);
+    }
+  };
+
+  const captureEditProductPhoto = async () => {
+    if (!editProductPhotoVideoRef.current) return;
+    const video = editProductPhotoVideoRef.current;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d")!.drawImage(video, 0, 0);
+    const base64 = canvas.toDataURL("image/jpeg", 0.9);
+    const resized = await resizeImage(base64);
+    setEditingProduct((prev) => ({ ...prev, image: resized }));
+    editProductPhotoStreamRef.current?.getTracks().forEach((t) => t.stop());
+    editProductPhotoStreamRef.current = null;
+    setEditProductPhotoCaptureOn(false);
+  };
   const [editingTypeId, setEditingTypeId] = useState<string | null>(null);
   const [editingTypeName, setEditingTypeName] = useState("");
 
@@ -655,6 +722,7 @@ export default function StockApp() {
   const [stockOutScanOn, setStockOutScanOn] = useState(false);
   const stockOutVideoRef = useRef<HTMLVideoElement>(null);
   const stockOutControlsRef = useRef<{ stop: () => void } | null>(null);
+  const [scanResultModal, setScanResultModal] = useState<{ productName: string; totalStock: number; found: boolean; code?: string } | null>(null);
 
   const startStockOutScan = async () => {
     setStockOutScanOn(true);
@@ -680,10 +748,11 @@ export default function StockApp() {
         const product = products.find((p) => p.barcode === code);
         if (product) {
           const firstStockDepo = stockForProduct(product.id).find((s) => s.qty > 0)?.depo || stockOutForm.depo;
+          const totalStock = stockForProduct(product.id).reduce((s, i) => s + i.qty, 0);
           setStockOutForm((prev) => ({ ...prev, productId: product.id, depo: firstStockDepo }));
-          showToast(`✅ ${product.name} bulundu.`, "success");
+          setScanResultModal({ productName: product.name, totalStock, found: true });
         } else {
-          showToast(`Barkod bulunamadı: ${code}. Listeden seçin.`, "error");
+          setScanResultModal({ productName: "", totalStock: 0, found: false, code });
         }
       };
 
@@ -1185,11 +1254,41 @@ export default function StockApp() {
 
             {/* Ürün Listesi */}
             <Card title="Ürün Listesi">
+              {/* Düzenleme paneli */}
+              {editingProductId && (
+                <div className="mb-4 rounded-xl border-2 border-blue-400 bg-blue-50 p-4">
+                  <div className="mb-3 text-sm font-semibold text-blue-700">Ürün Düzenle</div>
+                  <div className="space-y-3">
+                    <input className="input" placeholder="Ürün adı" value={editingProduct.name} onChange={(e) => setEditingProduct((p) => ({ ...p, name: e.target.value }))} />
+                    <select className="input" value={editingProduct.typeId} onChange={(e) => setEditingProduct((p) => ({ ...p, typeId: e.target.value }))}>
+                      <option value="">-- Tür Seç --</option>
+                      {productTypes.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                    <input className="input font-mono" placeholder="Barkod" value={editingProduct.barcode} onChange={(e) => setEditingProduct((p) => ({ ...p, barcode: e.target.value }))} />
+                    <div className="flex items-center gap-3">
+                      {editingProduct.image && <img src={editingProduct.image} alt="" className="h-16 w-16 rounded-lg object-cover border" />}
+                      <div className="flex flex-col gap-2">
+                        <label className="btn-secondary cursor-pointer text-center text-sm">📁 Dosyadan Seç<input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                          const file = e.target.files?.[0]; if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = async () => { const resized = await resizeImage(String(reader.result || "")); setEditingProduct((p) => ({ ...p, image: resized })); };
+                          reader.readAsDataURL(file);
+                        }} /></label>
+                        <button type="button" className="btn-secondary text-sm" onClick={openEditProductPhotoCapture}>📷 Kameradan Çek</button>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="button" className="btn-primary flex-1" disabled={processing} onClick={saveProductEdit}>{processing ? "..." : "Kaydet"}</button>
+                      <button type="button" className="btn-secondary flex-1" onClick={() => setEditingProductId(null)}>İptal</button>
+                    </div>
+                  </div>
+                </div>
+              )}
               <Table
-                headers={["Foto", "Ürün", "Tür", "Barkod", "Toplam Stok", "Durum"]}
+                headers={["Foto", "Ürün", "Tür", "Barkod", "Stok", "Durum", "Düzenle"]}
                 rows={products.map((p) => [
                   p.image_url ? <img src={p.image_url} alt="" className="h-12 w-12 rounded-lg object-cover" /> : <div className="h-12 w-12 rounded-lg bg-slate-100" />,
-                  p.name,
+                  <span className={editingProductId === p.id ? "font-bold text-blue-600" : ""}>{p.name}</span>,
                   typeMap.get(p.type_id || "")?.name || "-",
                   <span className="font-mono text-xs">{p.barcode || "-"}</span>,
                   <strong>{totalStockForProduct(p.id)}</strong>,
@@ -1198,9 +1297,33 @@ export default function StockApp() {
                       await supabase.from("products").update({ active: !p.active }).eq("id", p.id);
                       setProducts((prev) => prev.map((x) => x.id === p.id ? { ...x, active: !p.active } : x));
                     }}>{p.active ? "Aktif" : "Pasif"}</button>,
+                  <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => {
+                    setEditingProductId(p.id);
+                    setEditingProduct({ name: p.name, barcode: p.barcode || "", typeId: p.type_id || "", image: p.image_url || "" });
+                  }}>✎</button>,
                 ])}
               />
             </Card>
+          </div>
+        )}
+
+        {/* Ürün Düzenleme Fotoğraf Çekme Modalı */}
+        {editProductPhotoCaptureOn && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
+            <div className="w-full max-w-sm rounded-2xl bg-black p-4 shadow-xl">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-lg font-bold text-white">📷 Fotoğraf Çek</h3>
+                <button type="button" className="rounded-full bg-white/20 px-3 py-1 text-sm text-white" onClick={() => {
+                  editProductPhotoStreamRef.current?.getTracks().forEach((t) => t.stop());
+                  editProductPhotoStreamRef.current = null;
+                  setEditProductPhotoCaptureOn(false);
+                }}>Kapat</button>
+              </div>
+              <div className="relative overflow-hidden rounded-xl" style={{aspectRatio:"4/3"}}>
+                <video ref={editProductPhotoVideoRef} className="h-full w-full object-cover" autoPlay playsInline muted />
+              </div>
+              <button type="button" className="mt-3 w-full rounded-xl bg-white py-3 text-lg font-bold text-black" onClick={captureEditProductPhoto}>📸 Çek</button>
+            </div>
           </div>
         )}
 
@@ -1459,6 +1582,33 @@ export default function StockApp() {
               </div>
               <p className="mt-2 text-xs text-slate-400">⚠️ Kullanıcı ekledikten sonra Supabase Authentication &gt; Users kısmında aynı email ile hesap oluşturman gerekiyor.</p>
             </Card>
+          </div>
+        )}
+
+        {/* Tarama Sonuç Modalı */}
+        {scanResultModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
+              {scanResultModal.found ? (
+                <>
+                  <div className="text-5xl mb-3">{scanResultModal.totalStock > 0 ? "✅" : "⚠️"}</div>
+                  <h3 className="text-xl font-bold mb-2">{scanResultModal.productName}</h3>
+                  {scanResultModal.totalStock > 0 ? (
+                    <p className="text-green-600 font-semibold mb-4">Toplam stok: {scanResultModal.totalStock} adet</p>
+                  ) : (
+                    <p className="text-red-600 font-semibold mb-4">Stokta hiç kalmamış!</p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="text-5xl mb-3">❌</div>
+                  <h3 className="text-xl font-bold mb-2">Ürün Bulunamadı</h3>
+                  <p className="text-slate-500 mb-1 text-sm">Barkod: <span className="font-mono">{scanResultModal.code}</span></p>
+                  <p className="text-slate-500 mb-4 text-sm">Listeden manuel seçebilirsiniz.</p>
+                </>
+              )}
+              <button type="button" className="btn-primary w-full" onClick={() => setScanResultModal(null)}>Tamam</button>
+            </div>
           </div>
         )}
 
