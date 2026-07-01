@@ -1247,25 +1247,28 @@ export default function StockApp() {
               <p className="mt-2 text-xs text-slate-400">Stoktan iç kullanım ile ürün alan kişiler (uygulama hesabı gerekmez)</p>
             </Card>
             <Card title="İç Kullanıcı Listesi">
+              {/* Düzenleme paneli */}
+              {editingInternalUserId && (
+                <div className="mb-4 rounded-xl border-2 border-blue-400 bg-blue-50 p-3">
+                  <div className="mb-2 text-sm font-semibold text-blue-700">İsim Düzenle</div>
+                  <div className="flex gap-2">
+                    <input className="input flex-1" value={editingInternalUserName}
+                      onChange={(e) => setEditingInternalUserName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") updateInternalUser(editingInternalUserId, editingInternalUserName); if (e.key === "Escape") setEditingInternalUserId(null); }}
+                      autoFocus />
+                    <button type="button" className="btn" onClick={() => updateInternalUser(editingInternalUserId, editingInternalUserName)}>Kaydet</button>
+                    <button type="button" className="btn-secondary" onClick={() => setEditingInternalUserId(null)}>İptal</button>
+                  </div>
+                </div>
+              )}
               <Table
                 headers={["İsim", "Durum", "İşlem"]}
                 rows={internalUsers.map((u) => [
-                  editingInternalUserId === u.id ? (
-                    <div className="flex flex-col gap-2">
-                      <div className="text-xs text-slate-400">Düzenleniyor:</div>
-                      <div className="flex gap-1">
-                        <input className="input flex-1 border-2 border-blue-400 py-1" value={editingInternalUserName} onChange={(e) => setEditingInternalUserName(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") updateInternalUser(u.id, editingInternalUserName); if (e.key === "Escape") setEditingInternalUserId(null); }}
-                          autoFocus />
-                        <button type="button" className="btn text-xs px-3 py-1" onClick={() => updateInternalUser(u.id, editingInternalUserName)}>✓ Kaydet</button>
-                        <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => setEditingInternalUserId(null)}>✕</button>
-                      </div>
-                    </div>
-                  ) : u.name,
+                  <span className={editingInternalUserId === u.id ? "font-bold text-blue-600" : ""}>{u.name}</span>,
                   <button type="button" className={`text-xs rounded-full px-2 py-1 ${u.active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
                     onClick={() => toggleInternalUserActive(u.id, u.active)}>{u.active ? "Aktif" : "Pasif"}</button>,
                   <div className="flex gap-1">
-                    <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => { setEditingInternalUserId(u.id); setEditingInternalUserName(u.name); }}>✎ Düzenle</button>
+                    <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => { setEditingInternalUserId(u.id); setEditingInternalUserName(u.name); }}>✎</button>
                     <button type="button" className="btn-danger text-xs px-2 py-1" onClick={() => deleteInternalUser(u.id, u.name)}>Sil</button>
                   </div>,
                 ])}
