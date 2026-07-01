@@ -1251,12 +1251,15 @@ export default function StockApp() {
                 headers={["İsim", "Durum", "İşlem"]}
                 rows={internalUsers.map((u) => [
                   editingInternalUserId === u.id ? (
-                    <div className="flex gap-1">
-                      <input className="input py-1" value={editingInternalUserName} onChange={(e) => setEditingInternalUserName(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") updateInternalUser(u.id, editingInternalUserName); if (e.key === "Escape") setEditingInternalUserId(null); }}
-                        autoFocus />
-                      <button type="button" className="btn text-xs px-2 py-1" onClick={() => updateInternalUser(u.id, editingInternalUserName)}>✓</button>
-                      <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => setEditingInternalUserId(null)}>✕</button>
+                    <div className="flex flex-col gap-2">
+                      <div className="text-xs text-slate-400">Düzenleniyor:</div>
+                      <div className="flex gap-1">
+                        <input className="input flex-1 border-2 border-blue-400 py-1" value={editingInternalUserName} onChange={(e) => setEditingInternalUserName(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") updateInternalUser(u.id, editingInternalUserName); if (e.key === "Escape") setEditingInternalUserId(null); }}
+                          autoFocus />
+                        <button type="button" className="btn text-xs px-3 py-1" onClick={() => updateInternalUser(u.id, editingInternalUserName)}>✓ Kaydet</button>
+                        <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => setEditingInternalUserId(null)}>✕</button>
+                      </div>
                     </div>
                   ) : u.name,
                   <button type="button" className={`text-xs rounded-full px-2 py-1 ${u.active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
