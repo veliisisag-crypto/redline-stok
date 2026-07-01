@@ -279,6 +279,11 @@ export default function StockApp() {
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [editingProduct, setEditingProduct] = useState<{ name: string; barcode: string; typeId: string; image: string }>({ name: "", barcode: "", typeId: "", image: "" });
   const [newProductTypeName, setNewProductTypeName] = useState("");
+  // Ürün sayfası barkod tarama
+  const [productPageScanOn, setProductPageScanOn] = useState(false);
+  const productPageScanVideoRef = useRef<HTMLVideoElement>(null);
+  const productPageScanControlsRef = useRef<{ stop: () => void } | null>(null);
+  const [productPageScanResult, setProductPageScanResult] = useState<{ product: Product; stocks: StockItem[] } | null>(null);
 
   // Ürün edit kamera
   const editProductPhotoVideoRef = useRef<HTMLVideoElement>(null);
@@ -800,6 +805,60 @@ export default function StockApp() {
   // =============================================
   const [newCustomerName, setNewCustomerName] = useState("");
 
+  const startProductPageScan = async () => {
+    setProductPageScanOn(true);
+    try {
+      const { BrowserMultiFormatReader } = await import("@zxing/browser");
+      const { BarcodeFormat, DecodeHintType } = await import("@zxing/library");
+      const hints = new Map();
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.CODE_128]);
+      hints.set(DecodeHintType.TRY_HARDER, true);
+      const codeReader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 100 });
+      const videoEl = productPageScanVideoRef.current;
+      if (!videoEl) return;
+
+      const handleFound = (code: string) => {
+        stopClaudeFallback();
+        try { productPageScanControlsRef.current?.stop(); } catch {}
+        if (videoEl.srcObject) { (videoEl.srcObject as MediaStream).getTracks().forEach((t) => t.stop()); videoEl.srcObject = null; }
+        productPageScanControlsRef.current = null;
+        setProductPageScanOn(false);
+        const product = products.find((p) => p.barcode === code);
+        if (product) {
+          const stocks = stockItems.filter((s) => s.product_id === product.id);
+          setProductPageScanResult({ product, stocks });
+        } else {
+          showToast(`Barkod bulunamadı: ${code}`, "error");
+        }
+      };
+
+      const controls = await codeReader.decodeFromConstraints(
+        { video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } } },
+        videoEl,
+        (result) => { if (result) handleFound(result.getText()); }
+      );
+      productPageScanControlsRef.current = controls;
+      setTimeout(() => {
+        if (videoEl.readyState >= 2) startClaudeFallback(videoEl, handleFound);
+        else videoEl.onloadeddata = () => startClaudeFallback(videoEl, handleFound);
+      }, 1500);
+    } catch {
+      showToast("Kamera açılamadı.", "error");
+      setProductPageScanOn(false);
+    }
+  };
+
+  const stopProductPageScan = () => {
+    stopClaudeFallback();
+    try { productPageScanControlsRef.current?.stop(); } catch {}
+    productPageScanControlsRef.current = null;
+    if (productPageScanVideoRef.current?.srcObject) {
+      (productPageScanVideoRef.current.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
+      productPageScanVideoRef.current.srcObject = null;
+    }
+    setProductPageScanOn(false);
+  };
+
   const deleteProduct = async (p: Product) => {
     const hasStock = totalStockForProduct(p.id) > 0;
     const hasMovements = movements.some((m) => m.product_id === p.id);
@@ -1271,7 +1330,9 @@ export default function StockApp() {
             )}
 
             {/* Ürün Listesi */}
-            <Card title="Ürün Listesi">
+            <Card title="Ürün Listesi" action={
+              <button type="button" className="btn-secondary" onClick={() => { setProductPageScanOn(true); setTimeout(startProductPageScan, 300); }}>📷 Barkod Tara</button>
+            }>
               {/* Düzenleme paneli */}
               {editingProductId && (
                 <div className="mb-4 rounded-xl border-2 border-blue-400 bg-blue-50 p-4">
@@ -1302,29 +1363,139 @@ export default function StockApp() {
                   </div>
                 </div>
               )}
-              <Table
-                headers={["Foto", "Ürün", "Tür", "Barkod", "Stok", "Durum", "İşlem"]}
-                rows={products.map((p) => [
-                  p.image_url ? <img src={p.image_url} alt="" className="h-12 w-12 rounded-lg object-cover" /> : <div className="h-12 w-12 rounded-lg bg-slate-100" />,
-                  <span className={editingProductId === p.id ? "font-bold text-blue-600" : ""}>{p.name}</span>,
-                  typeMap.get(p.type_id || "")?.name || "-",
-                  <span className="font-mono text-xs">{p.barcode || "-"}</span>,
-                  <strong>{totalStockForProduct(p.id)}</strong>,
-                  <button type="button" className={`text-xs rounded-full px-2 py-1 ${p.active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
-                    onClick={async () => {
-                      await supabase.from("products").update({ active: !p.active }).eq("id", p.id);
-                      setProducts((prev) => prev.map((x) => x.id === p.id ? { ...x, active: !p.active } : x));
-                    }}>{p.active ? "Aktif" : "Pasif"}</button>,
-                  <div className="flex gap-1">
-                    <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => {
-                      setEditingProductId(p.id);
-                      setEditingProduct({ name: p.name, barcode: p.barcode || "", typeId: p.type_id || "", image: p.image_url || "" });
-                    }}>✎</button>
-                    <button type="button" className="btn-danger text-xs px-2 py-1" disabled={processing} onClick={() => deleteProduct(p)}>Sil</button>
-                  </div>,
-                ])}
-              />
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 text-left">
+                      <th className="px-2 py-2 font-semibold text-slate-600">Foto</th>
+                      <th className="px-2 py-2 font-semibold text-slate-600">Ürün</th>
+                      <th className="px-2 py-2 font-semibold text-slate-600">Barkod</th>
+                      {DEPOLAR.map((d) => (
+                        <th key={d} className="px-1 py-2 font-semibold text-slate-600 text-center" style={{minWidth:44, maxWidth:56}}>
+                          <div style={{writingMode:"vertical-rl", transform:"rotate(180deg)", fontSize:"0.7rem", lineHeight:1.2}}>{d}</div>
+                        </th>
+                      ))}
+                      <th className="px-2 py-2 font-semibold text-slate-600 text-center">Durum</th>
+                      <th className="px-2 py-2 font-semibold text-slate-600">İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {products.length === 0 ? (
+                      <tr><td colSpan={6 + DEPOLAR.length} className="px-3 py-8 text-center text-slate-400">Kayıt yok.</td></tr>
+                    ) : products.map((p) => (
+                      <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50">
+                        <td className="px-2 py-2">
+                          {p.image_url ? <img src={p.image_url} alt="" className="h-10 w-10 rounded-lg object-cover" /> : <div className="h-10 w-10 rounded-lg bg-slate-100" />}
+                        </td>
+                        <td className="px-2 py-2">
+                          <div className={`font-medium text-xs ${editingProductId === p.id ? "text-blue-600" : ""}`}>{p.name}</div>
+                          <div className="text-xs text-slate-400">{typeMap.get(p.type_id || "")?.name || ""}</div>
+                        </td>
+                        <td className="px-2 py-2"><span className="font-mono text-xs">{p.barcode || "-"}</span></td>
+                        {DEPOLAR.map((d) => (
+                          <td key={d} className="px-1 py-2 text-center font-bold text-sm">
+                            {stockForProductDepo(p.id, d) || <span className="text-slate-300">0</span>}
+                          </td>
+                        ))}
+                        <td className="px-2 py-2 text-center">
+                          <button type="button" className={`text-xs rounded-full px-2 py-1 ${p.active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
+                            onClick={async () => {
+                              await supabase.from("products").update({ active: !p.active }).eq("id", p.id);
+                              setProducts((prev) => prev.map((x) => x.id === p.id ? { ...x, active: !p.active } : x));
+                            }}>{p.active ? "Aktif" : "Pasif"}</button>
+                        </td>
+                        <td className="px-2 py-2">
+                          <div className="flex gap-1">
+                            <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => {
+                              setEditingProductId(p.id);
+                              setEditingProduct({ name: p.name, barcode: p.barcode || "", typeId: p.type_id || "", image: p.image_url || "" });
+                            }}>✎</button>
+                            <button type="button" className="btn-danger text-xs px-2 py-1" disabled={processing} onClick={() => deleteProduct(p)}>Sil</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </Card>
+          </div>
+        )}
+
+        {/* Ürün Sayfası Barkod Tarama Modalı */}
+        {productPageScanOn && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
+            <div className="w-full max-w-sm rounded-2xl bg-black p-4 shadow-xl">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-lg font-bold text-white">📷 Barkod Tara</h3>
+                <button type="button" className="rounded-full bg-white/20 px-3 py-1 text-sm text-white" onClick={stopProductPageScan}>Kapat</button>
+              </div>
+              <div className="relative overflow-hidden rounded-xl" style={{aspectRatio:"4/3"}}>
+                <video ref={productPageScanVideoRef} className="h-full w-full object-cover" autoPlay playsInline muted />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="h-24 w-72 rounded-lg border-4 border-red-400" style={{boxShadow:"0 0 0 9999px rgba(0,0,0,0.6)"}} />
+                </div>
+                <div className="absolute bottom-4 left-0 right-0 text-center text-sm text-white/80">Barkodu çerçeve içine alın...</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Ürün Sayfası Barkod Sonuç + İşlem Modalı */}
+        {productPageScanResult && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+              <div className="flex items-center gap-3 mb-4">
+                {productPageScanResult.product.image_url && <img src={productPageScanResult.product.image_url} alt="" className="h-16 w-16 rounded-xl object-cover" />}
+                <div>
+                  <h3 className="font-bold text-lg">{productPageScanResult.product.name}</h3>
+                  <div className="text-xs text-slate-400">{typeMap.get(productPageScanResult.product.type_id || "")?.name || ""}</div>
+                </div>
+              </div>
+              {/* Depo bazlı stok */}
+              <div className="mb-4 rounded-xl bg-slate-50 p-3 space-y-2">
+                {DEPOLAR.map((d) => {
+                  const qty = productPageScanResult.stocks.find((s) => s.depo === d)?.qty || 0;
+                  return (
+                    <div key={d} className="flex items-center justify-between">
+                      <span className="text-sm text-slate-600">{d}</span>
+                      <span className={`font-bold text-lg ${qty === 0 ? "text-slate-300" : qty <= 2 ? "text-orange-500" : "text-green-600"}`}>{qty}</span>
+                    </div>
+                  );
+                })}
+                <div className="border-t border-slate-200 pt-2 flex justify-between">
+                  <span className="text-sm font-semibold text-slate-600">Toplam</span>
+                  <span className="font-bold text-lg">{productPageScanResult.stocks.reduce((s, x) => s + x.qty, 0)}</span>
+                </div>
+              </div>
+              {/* İşlem seçimi */}
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <button type="button" className="rounded-xl border-2 border-slate-200 p-3 text-sm font-medium hover:border-blue-400 hover:bg-blue-50" onClick={() => {
+                  setStockInForm((p) => ({ ...p, productId: productPageScanResult.product.id }));
+                  setProductPageScanResult(null);
+                  setActive("stockIn");
+                }}>
+                  📥<br />Stok Giriş
+                </button>
+                <button type="button" className="rounded-xl border-2 border-slate-200 p-3 text-sm font-medium hover:border-blue-400 hover:bg-blue-50" onClick={() => {
+                  const firstDepo = productPageScanResult.stocks.find((s) => s.qty > 0)?.depo || DEPOLAR[0];
+                  setStockOutForm((p) => ({ ...p, productId: productPageScanResult.product.id, depo: firstDepo }));
+                  setProductPageScanResult(null);
+                  setActive("stockOut");
+                }}>
+                  📤<br />Stok Çıkış
+                </button>
+                <button type="button" className="rounded-xl border-2 border-slate-200 p-3 text-sm font-medium hover:border-blue-400 hover:bg-blue-50" onClick={() => {
+                  const p = productPageScanResult.product;
+                  setEditingProductId(p.id);
+                  setEditingProduct({ name: p.name, barcode: p.barcode || "", typeId: p.type_id || "", image: p.image_url || "" });
+                  setProductPageScanResult(null);
+                }}>
+                  ✎<br />Düzenle
+                </button>
+              </div>
+              <button type="button" className="btn-secondary w-full" onClick={() => setProductPageScanResult(null)}>Kapat</button>
+            </div>
           </div>
         )}
 

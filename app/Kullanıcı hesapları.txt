@@ -5,7 +5,8 @@ admin@redline.com    Canik&01-+
 anil@redline.com     Türkiş**54& 
 
 
+
 git status
 git add .
-git commit -m "page update 33"
+git commit -m "page.tsx 16"
 git push
