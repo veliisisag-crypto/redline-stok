@@ -1300,7 +1300,7 @@ export default function StockApp() {
         {active === "movements" && (
           <Card title="Tüm Stok Hareketleri">
             <Table
-              headers={["Tarih", "Ürün", "Tür", "Depo", "Adet", "Detay", "İşlem Yapan"]}
+              headers={["Tarih", "Ürün", "Tür", "Depo", "Adet", "Detay", "İşlem Yapan", ...(currentUserRole === "admin" ? ["Sil"] : [])]}
               rows={movements.map((m) => [
                 new Date(m.created_at).toLocaleString("tr-TR"),
                 productMap.get(m.product_id)?.name || "-",
@@ -1308,9 +1308,18 @@ export default function StockApp() {
                 m.depo,
                 m.qty,
                 m.movement_type === "cikis"
-                  ? (m.exit_type === "satis" ? `Satış → ${customerMap.get(m.customer_id || "")?.name || "-"}` : `İç kullanım → ${internalUserMap.get(m.internal_user_id || "")?.name || userMap.get(m.employee_id || "")?.name || "-"}`)
+                  ? (m.exit_type === "satis" ? "Satış" : `İç kullanım → ${internalUserMap.get(m.internal_user_id || "")?.name || userMap.get(m.employee_id || "")?.name || "-"}`)
                   : "-",
                 m.user_email || "-",
+                ...(currentUserRole === "admin" ? [
+                  <button type="button" className="btn-danger text-xs px-2 py-1" onClick={async () => {
+                    if (!confirm("Bu hareket silinsin mi? Stok miktarı geri alınmaz!")) return;
+                    const { error } = await supabase.from("stock_movements").delete().eq("id", m.id);
+                    if (error) return showError(error);
+                    setMovements((prev) => prev.filter((x) => x.id !== m.id));
+                    showToast("Hareket silindi.", "success");
+                  }}>Sil</button>
+                ] : []),
               ])}
             />
           </Card>
